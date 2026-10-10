@@ -90,6 +90,9 @@ jobs:
         run: pnpm smoke:docs
       - name: Unit tests
         run: pnpm test
+      - name: Remaining schema direct-engine diagnostic
+        if: ${{ !cancelled() }}
+        run: pnpm smoke:schema-remaining15-diagnostic
       - name: View smoke
         run: pnpm smoke:view
       - name: Verify Claude connector package
