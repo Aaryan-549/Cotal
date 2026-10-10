@@ -194,6 +194,7 @@ const TOKEN = "cnRlc3Rfc2xlZXBfdG9rZW5fMDAwMQ";
   const elapsedToken = "c3775_elapsed_sleep";
   const elapsed = await live.sleep({ duration: "1ms" }, ctx(elapsedToken).ctx)
     .then(value => ({ value }), error => ({ error }));
+  console.log(`• S3775 — first sleep returned after ${reads} real pre-mint reads`);
   assert.ok("value" in elapsed && elapsed.value === null,
     "S3775 elapsed relative sleep completes after the real broker pre-mint read");
   c("S3775 the shipped runtime reaches a real delayed checkpoint read", reads > 0, reads);
