@@ -13,7 +13,7 @@ pnpm --filter @cotal-ai/core smoke:schema-conformance-20
 
 The full twenty-case gate remains red. Every invocation evaluates all twenty cases through `@cotal-ai/core`, including synchronous results, the private brand, frozen pairs, original digests and unchanged schema/instance bytes. The controls cover ordinary error arrays, cache/table identity, closed references and profile bounds. Optional `--receipt <path>` and `--ordinary-reference <path>` arguments retain and compare ordinary error arrays across runs.
 
-The existing CI unit job builds the packages and runs both passing gates through `pnpm test`. The existing mutation reproof workflow discovers the named fixture:
+The existing CI unit job builds the packages and runs both passing gates through `pnpm test`. The mutation fixture builds core and invokes the same public regression file directly from the repository root. The existing mutation safety checker resolves `smoke:*` tokens against the root package scripts, not a `pnpm --filter` package. Using the core-only script names caused the initial CI fan-out to omit this fixture, so that green mutation run proved none of M04–M08. Direct file invocation keeps the suite inspectable without changing the safety checker or workflow:
 
 ```sh
 pnpm mutation-proof --config packages/core/smoke/mutations/schema-own-properties.json
