@@ -40,8 +40,7 @@ import {
   eptStreamName,
   eptSubject,
 } from "@cotal-ai/core";
-import { MeshHandler, EpfSettleWatcher } from "../src/index.js";
-import { MeshHandler as ShippedMeshHandler } from "@cotal-ai/runtime";
+import { MeshHandler, EpfSettleWatcher, MeshHandler as ShippedMeshHandler } from "@cotal-ai/runtime";
 import { pickFreePort } from "./_free-port.js";
 import { SMOKE_BROKER_TOKEN, teardownOnSignal } from "@cotal-ai/smoke-kit";
 
