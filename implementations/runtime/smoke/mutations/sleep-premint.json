@@ -15,6 +15,7 @@
       "replace": "      throw error;",
       "command": "pnpm --filter @cotal-ai/runtime build && pnpm smoke:runtime-mesh-sleep",
       "afterRestore": "pnpm --filter @cotal-ai/runtime build && pnpm smoke:runtime-mesh-sleep && pnpm smoke:runtime-run-driver-auth && pnpm smoke:runtime-mesh-checkpoint",
+      "completionMarker": "S3775 elapsed-sleep cell: predicate evaluated",
       "expectRed": "S3775 elapsed relative sleep completes after the real broker pre-mint read",
       "cell": "S3775 elapsed relative sleep completes after the real broker pre-mint read"
     }
