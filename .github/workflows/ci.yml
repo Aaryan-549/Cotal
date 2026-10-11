@@ -93,6 +93,9 @@ jobs:
       - name: Remaining schema direct-engine diagnostic
         if: ${{ !cancelled() }}
         run: pnpm smoke:schema-remaining15-diagnostic
+      - name: Remaining schema schemasafe comparison
+        if: ${{ !cancelled() }}
+        run: pnpm smoke:schema-remaining15-schemasafe-comparison
       - name: View smoke
         run: pnpm smoke:view
       - name: Verify Claude connector package
