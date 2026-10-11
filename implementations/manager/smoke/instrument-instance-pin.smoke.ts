@@ -800,15 +800,17 @@ try {
       // ATTRIBUTED REPLY from a responder, which is precisely the guard's own input and therefore
       // exactly the right witness here. It does NOT prove the command executed or that any effect
       // landed: an attributed reply can come from validation, authorization, admission, or a
-      // business refusal, and the schema-valid nonsense arguments below deliberately provoke the
-      // last of those. So this sweep grades the classifier-to-guard wiring across the vocabulary and
+      // business refusal. Most schema-valid nonsense arguments below provoke the last of those.
+      // So this sweep grades the classifier-to-guard wiring across the vocabulary and
       // nothing more. The `purge` cell above is the separate proof that a real destructive effect
       // runs, and it is the only cell in this file that claims one.
       // Each command needs SCHEMA-VALID arguments or the envelope refuses it before it is ever
       // published, which is precisely how the first version passed vacuously: `{}` fails
       // `required` on all seven, so none of them left the client. The values are deliberately
-      // nonsense (no such run, no such attempt) so every handler refuses on business grounds and
+      // nonsense (no such run, no such attempt) so those handlers refuse on business grounds and
       // nothing is launched, resumed, or preserved; refusing is a REPLY, which is all this needs.
+      // transcript-receive may execute once and change bounded ephemeral fixture transfer state
+      // or arm its timer. This arm does not promise an effect-free business refusal.
       // If a schema gains a required field, `notReached` goes red rather than the cell going quiet.
       const attempt = { attemptId: `no-such-attempt-${randomUUID().slice(0, 8)}` };
       const adminArgs: Record<string, Record<string, unknown>> = {
