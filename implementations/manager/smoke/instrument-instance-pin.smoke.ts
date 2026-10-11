@@ -819,6 +819,7 @@ try {
         "prepare-preservation": attempt,
         "commit-preservation": attempt,
         "abort-preservation": attempt,
+        "transcript-receive": { sha256: "0".repeat(64), size: 0, source: "fixture-transcript", sourceHost: "fixture-host" },
       };
       const notReached: string[] = [];
       const ranTwice: string[] = [];
