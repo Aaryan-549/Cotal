@@ -14,6 +14,11 @@ whole-stack cleanup and must fail `DR07-whole-stack-cleans-only-after-broker-sto
 
 Every command performs the normal build before the fourteen-cell suite.
 Every `afterRestore` rebuilds restored source and reruns the full suite.
+The distinct `COTAL_DOWN_RETENTION_TERMINAL` marker is printed after every
+existing finally cleanup action completes, on success or a named assertion
+failure. The original assertion error still propagates. If cleanup throws,
+the marker is absent and the mutation result remains inconclusive. The
+success-only smoke sentinel and all fourteen predicates remain unchanged.
 Compilation or module-mock import failure without the named assertion is not
 a kill. Node module-mock and tsx binding compatibility has not been executed.
 

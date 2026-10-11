@@ -114,4 +114,5 @@ try {
   if (home === undefined) delete process.env.COTAL_HOME;
   else process.env.COTAL_HOME = home;
   rmSync(root, { recursive: true, force: true });
+  console.log("COTAL_DOWN_RETENTION_TERMINAL");
 }

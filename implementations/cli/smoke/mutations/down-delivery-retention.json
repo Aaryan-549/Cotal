@@ -2,7 +2,7 @@
   "suite": ["implementations/cli/smoke/down-delivery-retention.smoke.ts"],
   "guard": "Whole-stack shutdown retains both delivery credential keys until every required process stop succeeds.",
   "command": "pnpm build && pnpm smoke:down-delivery-retention",
-  "completionMarker": "COTAL_SMOKE_SENTINEL",
+  "completionMarker": "COTAL_DOWN_RETENTION_TERMINAL",
   "proveWith": "node scripts/mutation-proof.mjs --config implementations/cli/smoke/mutations/down-delivery-retention.json",
   "why": [
     "Drive the unchanged shipped down and stopDelivery composition with real temporary filesystem credentials. Only the process-stop boundary is mocked. No process is started, signalled or probed.",
