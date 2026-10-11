@@ -162,7 +162,8 @@ export async function completion(args: ParsedArgs): Promise<void> {
   if (!script) {
     console.error(c.red("usage: cotal completion <bash|zsh|fish|powershell | install [shell]>"));
     console.error(c.dim("  enable it now (this shell):"));
-    console.error(c.dim("    bash/zsh:  source <(cotal completion bash)"));
+    console.error(c.dim("    bash:      source <(cotal completion bash)"));
+    console.error(c.dim("    zsh:       source <(cotal completion zsh)"));
     console.error(c.dim("    fish:      cotal completion fish | source"));
     console.error(c.dim("    pwsh:      cotal completion powershell | Out-String | Invoke-Expression"));
     console.error(c.dim("  or install it persistently:  cotal completion install"));

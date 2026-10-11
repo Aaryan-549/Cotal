@@ -2484,6 +2484,9 @@ cotal completion fish | source                               # fish
 cotal completion powershell | Out-String | Invoke-Expression # powershell
 ```
 
+The usage banner prints a separate snippet for each shell. In zsh, initialize its completion system
+with `autoload -Uz compinit && compinit` before sourcing the native zsh stub.
+
 `cotal completion install` wires completion persistently. It detects the active shell from `$SHELL`
 or takes a shell name positionally:
 
