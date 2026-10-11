@@ -984,7 +984,7 @@ export function loadSpaceAuth(dir: string, space: string): SpaceAuth | undefined
   // mount it (unchanged from pre-split). Recognize it precisely - split records absent, monolith
   // present for THIS space, operator blanked, signing seed present - and return it as-is; any
   // other shape must compose and verify the account really was signed by this broker's operator.
-  if (!existsSync(brokerAuthPath(dir)) && !existsSync(spaceAccountPath(dir, space))) {
+  if (!authRecordStat(brokerAuthPath(dir), "broker trust") && !authRecordStat(spaceAccountPath(dir, space), "a space account record")) {
     const legacy = loadLegacySpaceAuth(dir);
     if (legacy && legacy.space === space && !legacy.operator?.seed && legacy.account?.signingSeed)
       return legacy;

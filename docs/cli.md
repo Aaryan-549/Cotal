@@ -935,7 +935,9 @@ including inside another mesh's project. `status` is a read-only report: machine
 folder's `.cotal/`, the recorded meshes, and a live snapshot of the selected mesh (roster, channels,
 membership feed). Stale Claude skills and out-of-date `.agents` skills recommend `cotal setup --skills`,
 not unscoped `cotal setup`. `status` takes `--space` / `--server` to pick the mesh to inspect; it starts
-nothing. The manager row asks the service endpoint once: a live process that does not answer is
+nothing. The local auth reader uses a stripped signer only when both split trust records are absent.
+The load refuses dangling and looping links at either record even when an older stripped signer is present.
+The manager row asks the service endpoint once: a live process that does not answer is
 `not serving`, and a probe that could not be made leaves the row `running · service unchecked`.
 A process row whose PID record exists but cannot be read, or exists under both its current and a
 pre-upgrade name, reads `pidfile unreadable` with the error, and the other rows still print. A live
