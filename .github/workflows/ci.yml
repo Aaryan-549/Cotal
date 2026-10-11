@@ -165,64 +165,6 @@ jobs:
         shell: /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS -u BASHOPTS /usr/bin/bash --noprofile --norc -e -o pipefail {0}
         run: /usr/bin/git --no-replace-objects show "$GITHUB_SHA:bin/smoke/verify-shard-inputs.sh" | /usr/bin/bash --noprofile --norc -s -- "$GITHUB_SHA" ${{ matrix.shard }} 4 ci "${{ steps.smoke-tools.outputs.node_path }}" "${{ steps.smoke-tools.outputs.node_target }}" "${{ steps.smoke-tools.outputs.node_sha }}" "${{ steps.smoke-tools.outputs.pnpm_path }}" "${{ steps.smoke-tools.outputs.pnpm_target }}" "${{ steps.smoke-tools.outputs.pnpm_sha }}"
 
-  delivery-explicit-space-observation:
-    name: delivery explicit-space observation (${{ matrix.revision }})
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - revision: base
-            sha: ${{ github.event.pull_request.base.sha }}
-          - revision: head
-            sha: ${{ github.event.pull_request.head.sha }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ matrix.sha }}
-          fetch-depth: 0
-      - name: Record ordinary baseline revision
-        env:
-          REVISION: ${{ matrix.revision }}
-          EXPECTED_SHA: ${{ matrix.sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          printf 'DELIVERY_EXPLICIT_SPACE_OBSERVATION revision=%s expected=%s\n' "$REVISION" "$EXPECTED_SHA"
-          git show -s --format='DELIVERY_EXPLICIT_SPACE_OBSERVATION commit=%H tree=%T parents=%P' HEAD
-      - uses: pnpm/action-setup@v6.0.8
-        with:
-          standalone: true
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Cache nats-server
-        id: nats
-        uses: actions/cache@v4
-        with:
-          path: ~/nats-bin
-          key: nats-server-v2.12.12-${{ runner.os }}
-      - name: Install nats-server
-        if: steps.nats.outputs.cache-hit != 'true'
-        run: |
-          NATS_VERSION=v2.12.12
-          archive_dir="$(mktemp -d "$RUNNER_TEMP/nats-archive.XXXXXX")"
-          extract_dir="$(mktemp -d "$RUNNER_TEMP/nats-extract.XXXXXX")"
-          curl -fsSL "https://github.com/nats-io/nats-server/releases/download/${NATS_VERSION}/nats-server-${NATS_VERSION}-linux-amd64.tar.gz" -o "$archive_dir/nats-server.tar.gz"
-          tar -xzf "$archive_dir/nats-server.tar.gz" -C "$extract_dir"
-          mkdir -p ~/nats-bin
-          install "$extract_dir/nats-server-${NATS_VERSION}-linux-amd64/nats-server" ~/nats-bin/nats-server
-      - name: nats-server on PATH
-        run: echo "$HOME/nats-bin" >> "$GITHUB_PATH"
-      - name: Build
-        run: pnpm build
-      # Ordinary comparison only. Keep the fixture's existing stdout/stderr and failing exit status.
-      - name: Delivery explicit-space ordinary baseline
-        run: pnpm smoke:delivery-explicit-space
-
   live:
     timeout-minutes: 25
     runs-on: ubuntu-latest
