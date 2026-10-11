@@ -17,6 +17,46 @@ const corpus = JSON.parse(inputBytes);
 const clone = value => JSON.parse(JSON.stringify(value));
 const observed = { testsStarted: 0, testsEnded: 0, testsPassed: 0, testsFailed: 0,
   assertionAttempts: 0, assertionsPassed: 0, assertionsFailed: 0, rows: [] };
+const captureIds = new Set(['M09', 'M10', 'M09-C2', 'M09-C3', 'M10-C1', 'M19', 'M20', 'M19-C2']);
+const nativeCaptures = [];
+let captureBytes = 0;
+function boundedBytes(text, limit, label) {
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > limit) throw new Error(`Native diagnostic capture refused: ${label} exceeds ${limit} bytes`);
+  return bytes;
+}
+function detachedValue(value, label) {
+  // Encode undefined explicitly so JSON output retains native metadata fields.
+  const text = JSON.stringify(value, (_key, item) =>
+    item === undefined ? { diagnosticValue: 'undefined' } : item);
+  boundedBytes(text, 16 * 1024, label);
+  return JSON.parse(text);
+}
+function nativeSnapshot(validate, key) {
+  const value = validate[key];
+  return { present: key in validate, own: Object.hasOwn(validate, key),
+    type: typeof value, value: detachedValue(value, key) };
+}
+function captureNative(configuration, id, actual, validate, ajv) {
+  if (configuration !== 'shipped-pin' || !captureIds.has(id)) return;
+  const errors = nativeSnapshot(validate, 'errors');
+  const evaluated = nativeSnapshot(validate, 'evaluated');
+  const body = validate.toString();
+  const bodyBytes = boundedBytes(body, 64 * 1024, 'validator body');
+  const capture = { configuration, id, actual, errors, evaluated,
+    effectiveOptions: detachedValue({ strict: ajv.opts.strict, allErrors: ajv.opts.allErrors,
+      inlineRefs: ajv.opts.inlineRefs, ownProperties: ajv.opts.ownProperties,
+      validateFormats: ajv.opts.validateFormats, unicodeRegExp: ajv.opts.unicodeRegExp,
+      loadSchema: ajv.opts.loadSchema, unevaluated: ajv.opts.unevaluated,
+      dynamicRef: ajv.opts.dynamicRef, next: ajv.opts.next }, 'effective options'),
+    validator: { body, bytes: bodyBytes,
+      sha256: createHash('sha256').update(body, 'utf8').digest('hex') } };
+  const bytes = boundedBytes(JSON.stringify(capture), 128 * 1024, 'row');
+  if (captureBytes + bytes > 512 * 1024)
+    throw new Error('Native diagnostic capture refused: aggregate exceeds 524288 bytes');
+  nativeCaptures.push(capture);
+  captureBytes += bytes;
+}
 let current;
 function start(configuration, id) {
   if (current) throw new Error('Overlapping diagnostic test callbacks');
@@ -58,7 +98,8 @@ after(() => {
     observed.rows.reduce((sum, row) => sum + row.assertionAttempts, 0) === observed.assertionAttempts;
   console.log(JSON.stringify({ kind: 'direct-ajv197-node-test-diagnostic', runner: 'stock node:test',
     executionLevel: 'DIRECT_ENGINE_NOT_SHIPPED_compileContract', expectedTests: 197, complete,
-    ...observed, engineVersion, inputSha256, entry: import.meta.resolve('ajv/dist/2020.js') }));
+    ...observed, nativeCaptures, captureBytes, engineVersion, inputSha256,
+    entry: import.meta.resolve('ajv/dist/2020.js') }));
   if (!complete) throw new Error('Incomplete diagnostic census, not a measured 197-test result');
 });
 describe("2020-12 dynamic targets and evaluated annotation regressions", { concurrency: false }, () => {
@@ -93,6 +134,7 @@ describe("2020-12 dynamic targets and evaluated annotation regressions", { concu
           const validate = ajv.compile(schema)
           assert.strictEqual(typeof validate, "function")
           const actual = validate(instance)
+          captureNative(config.name, row.id, actual, validate, ajv)
           assert.strictEqual(typeof actual, "boolean")
           assert.strictEqual(JSON.stringify(schema), schemaBytes)
           assert.strictEqual(JSON.stringify(instance), instanceBytes)
