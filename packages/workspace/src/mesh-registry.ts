@@ -446,7 +446,8 @@ function assertMeshEntryShape(entry: MeshEntry, file: string): void {
  *  renders that as one `✗` line, so the operator reads WHICH record is wrong instead of a
  *  TypeError from the renderer (or a silently `undefined` column in `status`). Only an absent
  *  registry directory is an empty registry: one that exists but cannot be read throws, because
- *  callers act on "no meshes recorded" and an unread registry has not shown that. */
+ *  callers act on "no meshes recorded" and an unread registry has not shown that. A record
+ *  removed between listing and reading is absent, not damaged. */
 export function loadMeshes(): MeshEntry[] {
   let files: string[];
   try {
@@ -458,6 +459,7 @@ export function loadMeshes(): MeshEntry[] {
   const bySpace = new Map<string, { entry: MeshEntry; canonical: boolean }>();
   for (const f of files.sort()) {
     const entry = readMeshFile(join(meshesDir(), f));
+    if (entry === undefined) continue;
     // Safe unguarded: readMeshFile's shape check ran `space` through `spaceSegment`, which is the
     // only throw site of `meshFileName`.
     const canonical = f === meshFileName(entry.space);
@@ -467,11 +469,12 @@ export function loadMeshes(): MeshEntry[] {
   return [...bySpace.values()].map((v) => v.entry);
 }
 
-function readMeshFile(file: string): MeshEntry {
+function readMeshFile(file: string): MeshEntry | undefined {
   let entry: MeshEntry;
   try {
     entry = JSON.parse(readFileSync(file, "utf8")) as MeshEntry;
   } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     // No fallback: the writer is tmp-file + atomic rename, so an unparseable .json here is a
     // damaged or foreign document, and skipping it would hide it from `meshes rm` too.
     throw new Error(`${file} does not parse as a mesh record (${e instanceof Error ? e.message : String(e)}) - restore it from backup or remove it`);
@@ -491,7 +494,7 @@ export function readMesh(space: string): MeshEntry | undefined {
   const file = meshFile(space);
   if (!existsSync(file)) return undefined;
   const entry = readMeshFile(file);
-  return entry.space === space ? entry : undefined;
+  return entry?.space === space ? entry : undefined;
 }
 
 /** The default mesh's space name, set by `cotal use` (and by the first `cotal up`). Undefined when
