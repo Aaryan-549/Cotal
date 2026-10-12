@@ -1,0 +1,55 @@
+{
+  "grades": "tool",
+  "suite": [
+    "scripts/ci-validator-lock-acquisition.test.mjs"
+  ],
+  "guard": "four shipped entry admission guards refuse before any acquisition tool or engine runs",
+  "command": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs",
+  "progressPattern": "^ok [0-9]+ - ",
+  "completionMarker": "# tests 7",
+  "proveWith": "node scripts/mutation-proof.mjs --config scripts/mutations/validator-lock-acquisition.json",
+  "why": [
+    "Four runtime child controls require each designated guard message, not just a nonzero exit. Removing one guard reaches a later refusal with a different message and must redden its named control. No mutant admits the full acquisition path: later guards remain and each control supplies incomplete hosted context.",
+    "Three structural checks remain distinct from four runtime controls. Workflow jobs, event inputs, exact gates and artifact paths use the existing root yaml parser, not string includes or commented text.",
+    "Each mutation restores exact source through the maintained tool and then reruns the same full seven-control command. No build outputs are generated, no package install or engine imports. The completion marker is stock TAP total printed on pass and fail, not a success-only banner.",
+    "Own baseline, four designated kills and full restored controls are required before separately admitted manual acquisition. Source-only author has run none of these. Tests do not prove valid acquisition, full tool/config/privacy custody or returned dependency graph."
+  ],
+  "mutations": [
+    {
+      "name": "acquisition entry omits its arguments guard",
+      "file": "scripts/ci-validator-lock-acquisition.mjs",
+      "find": "assert.equal(process.argv.length, 2, 'No command or package inputs are supported');",
+      "replace": "void 0;",
+      "cell": "the shipped acquisition path accepts no command or package argument",
+      "expectRed": "the shipped acquisition path accepts no command or package argument",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition entry omits its hosted event guard",
+      "file": "scripts/ci-validator-lock-acquisition.mjs",
+      "find": "assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Acquisition requires GitHub Actions');",
+      "replace": "void 0;",
+      "cell": "the shipped acquisition path refuses local execution",
+      "expectRed": "the shipped acquisition path refuses local execution",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition entry omits its manual event guard",
+      "file": "scripts/ci-validator-lock-acquisition.mjs",
+      "find": "assert.equal(process.env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'Acquisition requires manual dispatch');",
+      "replace": "void 0;",
+      "cell": "the shipped acquisition path refuses a nonmanual event",
+      "expectRed": "the shipped acquisition path refuses a nonmanual event",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition entry omits its fixed mode guard",
+      "file": "scripts/ci-validator-lock-acquisition.mjs",
+      "find": "assert.equal(process.env.ACQUISITION_MODE, 'validators-0155', 'Unknown acquisition mode');",
+      "replace": "void 0;",
+      "cell": "the shipped acquisition path refuses an unknown acquisition mode",
+      "expectRed": "the shipped acquisition path refuses an unknown acquisition mode",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    }
+  ]
+}
