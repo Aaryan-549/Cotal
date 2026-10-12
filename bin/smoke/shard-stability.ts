@@ -49,7 +49,7 @@
  *   - matrix indices must not repeat or leave gaps
  *   - an empty matrix must not masquerade as shard zero
  *   - extra matrix content must not remove or duplicate jobs
- *   - the smoke job must not carry an execution condition
+ *   - the smoke job may only exclude manual dispatch with the fixed event condition
  *   - the shard step must not carry an execution condition
  *   - the shard runner must compare execution inputs directly with committed blobs
  *   - replacement refs must not redirect the streamed verifier or its committed input reads
@@ -147,7 +147,10 @@ const shardCountFromWorkflow = (yml: string, requireCommittedInputs = true, requ
   const jobKeys = jobLines
     .map((line) => /^    ([a-z][a-z0-9-]*):/i.exec(line)?.[1] ?? null)
     .filter((key): key is string => key !== null);
-  const allowedJobKeys = new Set(["name", "timeout-minutes", "runs-on", "strategy", "steps"]);
+  // This exact exclusion leaves the ordinary push/PR topology unchanged. Other conditions refuse.
+  const jobConditions = jobLines.filter((line) => /^    if:/.test(line));
+  if (jobConditions.some((line) => line !== "    if: ${{ github.event_name != 'workflow_dispatch' }}")) return null;
+  const allowedJobKeys = new Set(["if", "name", "timeout-minutes", "runs-on", "strategy", "steps"]);
   if (
     jobKeys.length !== jobLines.length ||
     jobKeys.some((key) => !allowedJobKeys.has(key)) ||
