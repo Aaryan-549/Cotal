@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquisitionToolResult } from './ci-validator-lock-acquisition-observation.mjs';
+import { assertAcquisitionPreflight } from './ci-validator-lock-acquisition-preflight.mjs';
 
 const pins = Object.freeze({
   'z-schema': '12.5.0',
@@ -73,6 +74,7 @@ assert.ok(!Object.keys(process.env).some(key => /^(npm_config_|pnpm_config_)/i.t
 'Unexpected package, auth or execution environment override');
 const root = realpathSync(process.env.GITHUB_WORKSPACE);
 assert.equal(realpathSync(process.cwd()), root);
+assertAcquisitionPreflight(root);
 assert.equal(git('status', '--porcelain=v1', '--untracked-files=all').trim(), '');
 const checkout = git('rev-parse', 'HEAD').trim();
 assert.equal(checkout, process.env.GITHUB_SHA);
