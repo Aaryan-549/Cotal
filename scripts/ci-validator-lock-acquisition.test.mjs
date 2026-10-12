@@ -4,8 +4,12 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { acquisitionToolResult } from './ci-validator-lock-acquisition-observation.mjs';
+import { assertAcquisitionPreflight } from './ci-validator-lock-acquisition-preflight.mjs';
 
 const script = fileURLToPath(new URL('./ci-validator-lock-acquisition.mjs', import.meta.url));
 const source = readFileSync(script, 'utf8');
@@ -191,4 +195,140 @@ test('shipped acquisition success returns original stdout without emitting a ref
       assert.equal(acquisitionToolResult({ status: 0, signal: null, stdout, stderr: '[ERROR] ignored' }), stdout);
     assert.equal(log.mock.callCount(), 0);
   } finally { log.mock.restore(); }
+});
+
+function preflightFixture(t) {
+  const base = fs.mkdtempSync(join(tmpdir(), 'acquisition-preflight-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'checkout');
+  const home = join(base, 'home');
+  const xdg = join(base, 'xdg');
+  fs.mkdirSync(join(root, 'packages', 'core'), { recursive: true });
+  fs.mkdirSync(join(home, '.config', 'pnpm'), { recursive: true });
+  fs.mkdirSync(join(xdg, 'pnpm'), { recursive: true });
+  const workspace = join(root, 'pnpm-workspace.yaml');
+  fs.copyFileSync(new URL('../pnpm-workspace.yaml', import.meta.url), workspace);
+  return { base, root, home, xdg, workspace };
+}
+test('shipped preflight admits only absent external config and default hooks with reviewed workspace bytes', t => {
+  const f = preflightFixture(t);
+  assert.doesNotThrow(() => assertAcquisitionPreflight(f.root, {}, f.home));
+  assert.doesNotThrow(() => assertAcquisitionPreflight(f.root, { XDG_CONFIG_HOME: f.xdg }, f.home));
+  assert.doesNotThrow(() => assertAcquisitionPreflight(f.root, { XDG_CONFIG_HOME: '' }, f.home));
+});
+test('shipped preflight refuses regular directory and dangling external config before loading it', t => {
+  const f = preflightFixture(t);
+  for (const [env, path] of [[{}, join(f.home, '.config', 'pnpm', 'config.yaml')],
+    [{ XDG_CONFIG_HOME: f.xdg }, join(f.xdg, 'pnpm', 'config.yaml')]]) {
+    for (const shape of ['regular', 'directory', 'dangling']) {
+      if (shape === 'regular') fs.writeFileSync(path, '{}\n');
+      else if (shape === 'directory') fs.mkdirSync(path);
+      else fs.symlinkSync(join(f.base, 'missing'), path);
+      assert.throws(() => assertAcquisitionPreflight(f.root, env, f.home),
+        { message: 'External pnpm configuration is not admitted' });
+      fs.rmSync(path, { recursive: true, force: true });
+    }
+  }
+});
+test('shipped preflight refuses uncertain path inspection instead of treating it as absence', t => {
+  const f = preflightFixture(t);
+  const original = fs.lstatSync;
+  const path = join(f.xdg, 'pnpm', 'config.yaml');
+  const mock = t.mock.method(fs, 'lstatSync', (...args) => {
+    if (args[0] === path) throw Object.assign(new Error('private fixture detail'), { code: 'EACCES' });
+    return original(...args);
+  });
+  try {
+    assert.throws(() => assertAcquisitionPreflight(f.root, { XDG_CONFIG_HOME: f.xdg }, f.home),
+      { message: 'Cannot inspect acquisition preflight path' });
+  } finally { mock.mock.restore(); }
+});
+test('shipped preflight refuses uncertain symlink and nondirectory parents', t => {
+  const f = preflightFixture(t);
+  for (const shape of ['regular', 'symlink', 'dangling']) {
+    const parent = join(f.base, 'parent');
+    if (shape === 'regular') fs.writeFileSync(parent, 'inert');
+    else fs.symlinkSync(shape === 'symlink' ? f.xdg : join(f.base, 'missing'), parent);
+    assert.throws(() => assertAcquisitionPreflight(f.root, { XDG_CONFIG_HOME: parent }, f.home),
+      { message: 'Cannot inspect acquisition preflight path' });
+    fs.rmSync(parent, { force: true });
+  }
+});
+test('shipped preflight refuses actual root and core default hooks including dangling objects', t => {
+  const f = preflightFixture(t);
+  for (const directory of [f.root, join(f.root, 'packages', 'core')]) {
+    for (const name of ['.pnpmfile.mjs', '.pnpmfile.cjs']) {
+      const path = join(directory, name);
+      for (const shape of ['regular', 'directory', 'dangling']) {
+        if (shape === 'regular') fs.writeFileSync(path, '// inert fixture, never imported\n');
+        else if (shape === 'directory') fs.mkdirSync(path);
+        else fs.symlinkSync(join(f.base, 'missing'), path);
+        assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home),
+          { message: 'Default package hook is not admitted' });
+        fs.rmSync(path, { recursive: true, force: true });
+      }
+    }
+  }
+});
+test('shipped preflight refuses changed workspace config dependency and server declarations', t => {
+  const f = preflightFixture(t);
+  const bytes = fs.readFileSync(f.workspace);
+  const sameLength = Buffer.from(bytes);
+  sameLength[0] ^= 1;
+  for (const changed of [sameLength, Buffer.concat([bytes, Buffer.from('configDependencies: {}\n')]),
+    Buffer.concat([bytes, Buffer.from('pnprServer: null\n')])]) {
+    fs.writeFileSync(f.workspace, changed);
+    assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home),
+      { message: 'Reviewed workspace settings differ' });
+  }
+});
+test('shipped preflight refuses missing symlink directory and uncertain workspace input', t => {
+  const f = preflightFixture(t);
+  const copy = join(f.base, 'workspace-copy');
+  fs.copyFileSync(f.workspace, copy);
+  fs.unlinkSync(f.workspace);
+  assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home), { message: 'Reviewed workspace settings differ' });
+  fs.symlinkSync(copy, f.workspace);
+  assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home), { message: 'Reviewed workspace settings differ' });
+  fs.unlinkSync(f.workspace);
+  fs.mkdirSync(f.workspace);
+  assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home), { message: 'Reviewed workspace settings differ' });
+  fs.rmdirSync(f.workspace);
+  fs.copyFileSync(copy, f.workspace);
+  const original = fs.readFileSync;
+  const mock = t.mock.method(fs, 'readFileSync', (...args) => {
+    if (args[0] === f.workspace) throw Object.assign(new Error('private fixture detail'), { code: 'EACCES' });
+    return original(...args);
+  });
+  try {
+    assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home), { message: 'Reviewed workspace settings differ' });
+  } finally { mock.mock.restore(); }
+  const originalStat = fs.lstatSync;
+  let workspaceStats = 0;
+  const changed = t.mock.method(fs, 'lstatSync', (...args) => {
+    const entry = originalStat(...args);
+    if (args[0] === f.workspace && ++workspaceStats === 2) entry.mtimeMs += 1;
+    return entry;
+  });
+  try {
+    assert.throws(() => assertAcquisitionPreflight(f.root, {}, f.home), { message: 'Reviewed workspace settings differ' });
+  } finally { changed.mock.restore(); }
+});
+test('the real acquisition entry calls preflight before any pnpm or git child', t => {
+  const f = preflightFixture(t);
+  const event = join(f.base, 'event.json');
+  fs.writeFileSync(event, JSON.stringify({ inputs: { acquisition: 'validators-0155' } }));
+  fs.writeFileSync(join(f.xdg, 'pnpm', 'config.yaml'), '{}\n');
+  const env = { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch', ACQUISITION_MODE: 'validators-0155',
+    GITHUB_SHA: '1'.repeat(40), GITHUB_RUN_ID: '1', GITHUB_RUN_ATTEMPT: '1',
+    GITHUB_JOB: 'validator-lock-acquisition', GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: f.root,
+    XDG_CONFIG_HOME: f.xdg, HOME: f.home, PATH: '' };
+  const result = spawnSync(process.execPath, [script], { env, cwd: f.root, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(result.error, undefined);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stderr.includes('External pnpm configuration is not admitted'), true,
+    'Must reach the real preflight before an unavailable git or pnpm can run');
+  assert.equal(result.stdout, '', 'No tool observation or output claim before admission');
+  assert.equal(source.match(/^assertAcquisitionPreflight\(root\);$/gm)?.length, 1);
+  assert.ok(source.indexOf('assertAcquisitionPreflight(root);') < source.indexOf("assert.equal(run('pnpm', ['--version'])"));
 });
