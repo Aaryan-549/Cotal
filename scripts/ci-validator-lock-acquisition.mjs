@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { acquisitionToolResult } from './ci-validator-lock-acquisition-observation.mjs';
 
 const pins = Object.freeze({
   'z-schema': '12.5.0',
@@ -23,12 +24,7 @@ const maxFileBytes = 8 * 1024 * 1024;
 function run(executable, args) {
   const result = spawnSync(executable, args, { encoding: 'utf8', timeout: 600_000,
     maxBuffer: maxFileBytes, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' } });
-  if (result.error || result.status !== 0) {
-    console.log(JSON.stringify({ kind: 'validator-acquisition-tool-refusal', status: result.status,
-      signal: result.signal, errorCode: result.error?.code ?? null }));
-    throw new Error('Acquisition tool refused or exceeded its bound');
-  }
-  return result.stdout;
+  return acquisitionToolResult(result);
 }
 function git(...args) { return run('git', ['--no-replace-objects', ...args]); }
 function file(path) {

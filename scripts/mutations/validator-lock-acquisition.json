@@ -3,16 +3,17 @@
   "suite": [
     "scripts/ci-validator-lock-acquisition.test.mjs"
   ],
-  "guard": "four shipped entry admission guards refuse before any acquisition tool or engine runs",
+  "guard": "four shipped entry admission guards and bounded returned-tool failure observations",
   "command": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs",
   "progressPattern": "^ok [0-9]+ - ",
-  "completionMarker": "# tests 7",
+  "completionMarker": "# tests 13",
   "proveWith": "node scripts/mutation-proof.mjs --config scripts/mutations/validator-lock-acquisition.json",
   "why": [
     "Four runtime child controls require each designated guard message, not just a nonzero exit. Removing one guard reaches a later refusal with a different message and must redden its named control. No mutant admits the full acquisition path: later guards remain and each control supplies incomplete hosted context.",
     "Three structural checks remain distinct from four runtime controls. Workflow jobs, event inputs, exact gates and artifact paths use the existing root yaml parser, not string includes or commented text.",
-    "Each mutation restores exact source through the maintained tool and then reruns the same full seven-control command. No build outputs are generated, no package install or engine imports. The completion marker is stock TAP total printed on pass and fail, not a success-only banner.",
-    "Own baseline, four designated kills and full restored controls are required before separately admitted manual acquisition. Source-only author has run none of these. Tests do not prove valid acquisition, full tool/config/privacy custody or returned dependency graph."
+    "Each mutation restores exact source through the maintained tool and then reruns the same full thirteen-control command. No build outputs are generated, no package install or engine imports. The completion marker is stock TAP total printed on pass and fail, not a success-only banner.",
+    "Own baseline, seven designated kills and full restored controls are required before separately admitted manual acquisition. Source-only author has run none of these. Tests do not prove valid acquisition, full tool/config/privacy custody or returned dependency graph.",
+    "Six added callbacks drive the same imported result handler used by run(), with pinned bracketed pnpm formatting, UNKNOWN, independent streams, privacy, scan/counter bounds, error precedence and success retention. No test acquires packages. All thirteen controls and seven mutation designs remain unexecuted by this source author."
   ],
   "mutations": [
     {
@@ -49,6 +50,33 @@
       "replace": "void 0;",
       "cell": "the shipped acquisition path refuses an unknown acquisition mode",
       "expectRed": "the shipped acquisition path refuses an unknown acquisition mode",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition result omits the captured stderr observation",
+      "file": "scripts/ci-validator-lock-acquisition-observation.mjs",
+      "find": "stderr: streamObservation(result.stderr)",
+      "replace": "stderr: streamObservation(null)",
+      "cell": "shipped acquisition refusal retains closed pinned pnpm header shapes without captured tokens",
+      "expectRed": "shipped acquisition refusal retains closed pinned pnpm header shapes without captured tokens",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition result publishes arbitrary spawn error code",
+      "file": "scripts/ci-validator-lock-acquisition-observation.mjs",
+      "find": "? result.error.code : 'OTHER'",
+      "replace": "? result.error.code : result.error.code",
+      "cell": "shipped acquisition refusal keeps error precedence and emits only closed returned status fields",
+      "expectRed": "shipped acquisition refusal keeps error precedence and emits only closed returned status fields",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition observation claims a complete scan of truncated returned text",
+      "file": "scripts/ci-validator-lock-acquisition-observation.mjs",
+      "find": "scanComplete: state === 'TEXT' && value.length <= scanCharacters",
+      "replace": "scanComplete: state === 'TEXT'",
+      "cell": "shipped acquisition refusal bounds scanning and saturates counters without denying omitted shapes",
+      "expectRed": "shipped acquisition refusal bounds scanning and saturates counters without denying omitted shapes",
       "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
     }
   ]
