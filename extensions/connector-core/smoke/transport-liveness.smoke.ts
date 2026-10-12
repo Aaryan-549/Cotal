@@ -177,6 +177,7 @@ class FakeNc {
   readonly queue = new StatusQueue();
   closedFlag = false;
   constructor(readonly server: string) {}
+  async request(): Promise<never> { throw new Error("transport-liveness fixture must not issue requests"); }
   status(): AsyncIterable<Status> { return this.queue; }
   getServer(): string { return this.server; }
   isClosed(): boolean { return this.closedFlag; }
@@ -414,24 +415,43 @@ const starting = new MeshAgent({ ...cfg, name: "starting-agent" });
 const startingEp = starting.ep as unknown as EndpointHarness;
 let releaseBind!: () => void;
 const bindGate = new Promise<void>((resolve) => { releaseBind = resolve; });
+let enteredBind!: () => void;
+const bindParked = new Promise<void>((resolve) => { enteredBind = resolve; });
+let bindReleased = false;
+let bindFinished = false;
 const freshNc = new DrainWitnessNc("nats://fresh-after-stop");
 let supervised = 0;
 startingEp.connectAndBind = async () => {
+  enteredBind();
   await bindGate;
+  bindFinished = true;
   startingEp.nc = freshNc;
   startingEp.heartbeatTimer = setInterval(() => {}, 60_000);
 };
 startingEp.superviseConnection = () => { supervised++; };
 const startingPromise = starting.start(1);
+await bindParked;
+let stopSettled = false;
+const stopFlight = starting.stop().then(
+  () => { stopSettled = true; return { ok: true as const }; },
+  (error: unknown) => { stopSettled = true; return { ok: false as const, error }; },
+);
+// The controlled bind cannot finish until this fixture releases it. Observe the terminal decision
+// while that gate is held, but do not await stop completion ahead of the work it must join.
 await tick();
-await starting.stop(); // stop fully completes while the initial bind is still parked
+const stoppedWhileBindParked = (starting.ep as unknown as { stopped: boolean }).stopped &&
+  !bindReleased && !bindFinished && !stopSettled;
+bindReleased = true;
 releaseBind();
-await startingPromise;
+const [stopResult] = await Promise.all([stopFlight, startingPromise]);
+if (!stopResult.ok) throw stopResult.error;
 check(
   "#975: stop racing the INITIAL bind leaves no nc, heartbeat, or armed supervisor",
-  freshNc.closes === 1 && freshNc.drains === 0 && freshNc.closedFlag === true && startingEp.nc === undefined &&
+  stoppedWhileBindParked && bindFinished && freshNc.closes === 1 && freshNc.drains === 0 && freshNc.closedFlag === true && startingEp.nc === undefined &&
     startingEp.heartbeatTimer === undefined && supervised === 0,
   {
+    stoppedWhileBindParked,
+    bindFinished,
     closes: freshNc.closes,
     drains: freshNc.drains,
     closed: freshNc.closedFlag,
@@ -447,18 +467,42 @@ if (startingEp.heartbeatTimer) clearInterval(startingEp.heartbeatTimer);
 if (!freshNc.closedFlag) await freshNc.close();
 
 const failing = new MeshAgent({ ...cfg, name: "failing-start-agent" });
+const failingEp = failing.ep as unknown as EndpointHarness;
 let rejectStart!: (error: Error) => void;
 const startGate = new Promise<void>((_resolve, reject) => { rejectStart = reject; });
-(failing.ep as unknown as EndpointHarness).connectAndBind = () => startGate;
+let enteredFailingBind!: () => void;
+const failingBindParked = new Promise<void>((resolve) => { enteredFailingBind = resolve; });
+let startRejected = false;
+let failingBindFinished = false;
+let failingSupervised = 0;
+failingEp.connectAndBind = async () => {
+  enteredFailingBind();
+  try { await startGate; } finally { failingBindFinished = true; }
+};
+failingEp.superviseConnection = () => { failingSupervised++; };
 const failedStart = failing.start(1);
+await failingBindParked;
+let failingStopSettled = false;
+const failingStop = failing.stop().then(
+  () => { failingStopSettled = true; return { ok: true as const }; },
+  (error: unknown) => { failingStopSettled = true; return { ok: false as const, error }; },
+);
+// Endpoint.stop joins the initial start and retains its rejection. MeshAgent's connect loop
+// returns on the stopped branch, without recording that late error or retrying it.
 await tick();
-await failing.stop();
-rejectStart(new Error("late start rejection"));
-await failedStart;
+const stoppedWhileFailingBindParked = (failing.ep as unknown as { stopped: boolean }).stopped &&
+  !startRejected && !failingBindFinished && !failingStopSettled;
+const lateStartError = new Error("late start rejection");
+startRejected = true;
+rejectStart(lateStartError);
+const [failingStopResult] = await Promise.all([failingStop, failedStart]);
+if (!failingStopResult.ok && failingStopResult.error !== lateStartError) throw failingStopResult.error;
 check(
   "a start rejection arriving after stop cannot replace the post-mortem diagnostic",
-  failing.connectionIssue === undefined,
-  failing.connectionIssue,
+  stoppedWhileFailingBindParked && failingBindFinished && !failingStopResult.ok &&
+    failingStopResult.error === lateStartError && failingSupervised === 0 && failing.connectionIssue === undefined,
+  { stoppedWhileFailingBindParked, failingBindFinished, stopRejectedWithOriginal: !failingStopResult.ok && failingStopResult.error === lateStartError,
+    failingSupervised, issue: failing.connectionIssue },
 );
 
 } catch (error) {
