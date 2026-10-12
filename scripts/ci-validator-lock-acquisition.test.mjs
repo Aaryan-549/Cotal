@@ -26,11 +26,23 @@ test('the shipped acquisition path refuses a nonmanual event', () =>
 test('the shipped acquisition path refuses an unknown acquisition mode', () =>
   refuse('Unknown acquisition mode', { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch', ACQUISITION_MODE: 'other' }));
 test('the shipped acquisition path accepts no command or package argument', () => refuse('No command or package inputs are supported', {}, ['z-schema@latest']));
+test('the shipped acquisition command uses supported config spellings for all four fixed policies', () => {
+  const definitions = [...source.matchAll(/^const command = Object\.freeze\(\[([\s\S]*?)^\]\);/gm)];
+  assert.equal(definitions.length, 1, 'Inspect the actual unique shipped command definition');
+  const literals = [...definitions[0][1].matchAll(/'([^']*)'/g)].map(match => match[1]);
+  for (const spelling of ['--config.minimum-release-age=1440', '--config.minimum-release-age-strict=true',
+    '--config.minimum-release-age-ignore-missing-time=false', '--config.block-exotic-subdeps=true'])
+    assert.equal(literals.filter(value => value === spelling).length, 1, spelling);
+  for (const unsupported of ['--minimum-release-age', '--minimum-release-age-strict',
+    '--minimum-release-age-ignore-missing-time', '--block-exotic-subdeps'])
+    assert.equal(literals.some(value => value.split('=')[0] === unsupported), false, unsupported);
+  assert.equal(source.includes("const log = run('pnpm', command);"), true);
+});
 test('only the fixed package pins and lock-only lifecycle flags are shipped', () => {
   for (const literal of ["'z-schema': '12.5.0'", "'@hyperjump/json-schema': '1.18.0'",
     "'@hyperjump/browser': '1.5.1'", "'json-schema-library': '11.6.6'",
-    "'--lockfile-only'", "'--ignore-scripts'", "'--minimum-release-age=1440'",
-    "'--minimum-release-age-strict'", "'--minimum-release-age-ignore-missing-time=false'"])
+    "'--lockfile-only'", "'--ignore-scripts'", "'--config.minimum-release-age=1440'",
+    "'--config.minimum-release-age-strict=true'", "'--config.minimum-release-age-ignore-missing-time=false'"])
     assert.equal(source.includes(literal), true, literal);
   assert.equal(source.includes("run('pnpm', command)"), true);
   assert.equal(source.includes('await import('), false);

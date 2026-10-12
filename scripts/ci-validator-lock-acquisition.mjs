@@ -14,8 +14,8 @@ const pins = Object.freeze({
 });
 const command = Object.freeze([
   '--filter', '@cotal-ai/core', 'add', '--save-dev', '--save-exact', '--lockfile-only',
-  '--ignore-scripts', '--minimum-release-age=1440', '--minimum-release-age-strict',
-  '--minimum-release-age-ignore-missing-time=false', '--block-exotic-subdeps',
+  '--ignore-scripts', '--config.minimum-release-age=1440', '--config.minimum-release-age-strict=true',
+  '--config.minimum-release-age-ignore-missing-time=false', '--config.block-exotic-subdeps=true',
   ...Object.entries(pins).map(([name, version]) => `${name}@${version}`),
 ]);
 const registry = 'https://registry.npmjs.org/';

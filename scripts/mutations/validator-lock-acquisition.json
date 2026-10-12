@@ -3,17 +3,18 @@
   "suite": [
     "scripts/ci-validator-lock-acquisition.test.mjs"
   ],
-  "guard": "four shipped entry admission guards and bounded returned-tool failure observations",
+  "guard": "four shipped entry admission guards and bounded returned-tool failure observations and supported fixed-policy CLI spellings",
   "command": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs",
   "progressPattern": "^ok [0-9]+ - ",
-  "completionMarker": "# tests 13",
+  "completionMarker": "# tests 14",
   "proveWith": "node scripts/mutation-proof.mjs --config scripts/mutations/validator-lock-acquisition.json",
   "why": [
     "Four runtime child controls require each designated guard message, not just a nonzero exit. Removing one guard reaches a later refusal with a different message and must redden its named control. No mutant admits the full acquisition path: later guards remain and each control supplies incomplete hosted context.",
     "Three structural checks remain distinct from four runtime controls. Workflow jobs, event inputs, exact gates and artifact paths use the existing root yaml parser, not string includes or commented text.",
-    "Each mutation restores exact source through the maintained tool and then reruns the same full thirteen-control command. No build outputs are generated, no package install or engine imports. The completion marker is stock TAP total printed on pass and fail, not a success-only banner.",
-    "Own baseline, seven designated kills and full restored controls are required before separately admitted manual acquisition. Source-only author has run none of these. Tests do not prove valid acquisition, full tool/config/privacy custody or returned dependency graph.",
-    "Six added callbacks drive the same imported result handler used by run(), with pinned bracketed pnpm formatting, UNKNOWN, independent streams, privacy, scan/counter bounds, error precedence and success retention. No test acquires packages. All thirteen controls and seven mutation designs remain unexecuted by this source author."
+    "Each mutation restores exact source through the maintained tool and then reruns the same full fourteen-control command. No build outputs are generated, no package install or engine imports. The completion marker is stock TAP total printed on pass and fail, not a success-only banner.",
+    "Own baseline, eight designated kills and full restored controls are required before separately admitted manual acquisition. Source-only author has run none of these. Tests do not prove valid acquisition, full tool/config/privacy custody or returned dependency graph.",
+    "Six added callbacks drive the same imported result handler used by run(), with pinned bracketed pnpm formatting, UNKNOWN, independent streams, privacy, scan/counter bounds, error precedence and success retention. No test acquires packages. All thirteen controls and seven mutation designs remain unexecuted by this source author.",
+    "The focused source control reads the actual unique shipped command definition before the older fixed-literal control. Reverting all four config spellings must redden that named control. It does not run pnpm, copy its parser or prove effective hosted policy. Fourteen callbacks and eight mutation designs remain unexecuted by this source author."
   ],
   "mutations": [
     {
@@ -77,6 +78,15 @@
       "replace": "scanComplete: state === 'TEXT'",
       "cell": "shipped acquisition refusal bounds scanning and saturates counters without denying omitted shapes",
       "expectRed": "shipped acquisition refusal bounds scanning and saturates counters without denying omitted shapes",
+      "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
+    },
+    {
+      "name": "acquisition command restores unsupported bare policy flags",
+      "file": "scripts/ci-validator-lock-acquisition.mjs",
+      "find": "  '--ignore-scripts', '--config.minimum-release-age=1440', '--config.minimum-release-age-strict=true',\n  '--config.minimum-release-age-ignore-missing-time=false', '--config.block-exotic-subdeps=true',",
+      "replace": "  '--ignore-scripts', '--minimum-release-age=1440', '--minimum-release-age-strict',\n  '--minimum-release-age-ignore-missing-time=false', '--block-exotic-subdeps',",
+      "cell": "the shipped acquisition command uses supported config spellings for all four fixed policies",
+      "expectRed": "the shipped acquisition command uses supported config spellings for all four fixed policies",
       "afterRestore": "node --test --test-reporter=tap --test-concurrency=1 scripts/ci-validator-lock-acquisition.test.mjs"
     }
   ]
