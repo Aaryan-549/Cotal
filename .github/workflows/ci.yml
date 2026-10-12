@@ -96,6 +96,9 @@ jobs:
       - name: Remaining schema schemasafe comparison
         if: ${{ !cancelled() }}
         run: pnpm smoke:schema-remaining15-schemasafe-comparison
+      - name: Released schemasafe public-error diagnostic
+        if: ${{ !cancelled() }}
+        run: pnpm smoke:schema-schemasafe-public-errors
       - name: View smoke
         run: pnpm smoke:view
       - name: Verify Claude connector package
