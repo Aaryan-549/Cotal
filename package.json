@@ -479,6 +479,7 @@
     "smoke:bind-fence": "tsx packages/core/smoke/bind-fence.smoke.ts",
     "smoke:unfenced-responder": "tsx packages/core/smoke/unfenced-responder.smoke.ts",
     "smoke:ep-serve-gate": "tsx packages/core/smoke/endpoint-serve-gate.smoke.ts",
+    "smoke:environment-manager-grants": "tsx packages/core/smoke/environment-manager-grants.smoke.ts",
     "smoke:manager-service": "tsx implementations/manager/smoke/manager-service.smoke.ts",
     "smoke:manager-renewal-boundary": "tsx implementations/manager/smoke/manager-renewal-boundary.smoke.ts",
     "smoke:manager-harness-boot": "tsx implementations/manager/smoke/harness-boot.smoke.ts",
@@ -592,6 +593,7 @@
     "smoke:update-concurrency": "pnpm --filter cotal-ai... build && tsx implementations/cli/smoke/update-concurrency.smoke.ts",
     "smoke:join-creds": "tsx implementations/cli/smoke/join-creds-pairing.smoke.ts",
     "smoke:clean": "tsx implementations/cli/smoke/clean.smoke.ts",
+    "smoke:down-delivery-retention": "node --experimental-test-module-mocks --import tsx implementations/cli/smoke/down-delivery-retention.smoke.ts",
     "smoke:multi-space": "tsx implementations/cli/smoke/multi-space.smoke.ts",
     "smoke:up-multi-space-render:live": "tsx implementations/cli/smoke/up-multi-space-render-live.smoke.ts",
     "smoke:up-refresh-identity:live": "tsx implementations/cli/smoke/up-refresh-identity-live.smoke.ts",
@@ -786,6 +788,10 @@
     "smoke:environment-service": "tsx implementations/environments/smoke/service.smoke.ts",
     "smoke:environment-wire": "tsx implementations/environments/smoke/wire.smoke.ts",
     "smoke:platform-supervisor": "tsx implementations/auth/smoke/platform-supervisor.smoke.ts",
+    "smoke:environment-manager-family": "tsx implementations/auth/smoke/environment-manager-family.smoke.ts",
+    "smoke:environment-manager-admission": "tsx implementations/auth/smoke/environment-manager-admission.smoke.ts",
+    "smoke:environment-manager-admission-index": "tsx implementations/auth/smoke/environment-manager-admission-index.smoke.ts",
+    "smoke:environment-manager-bootstrap-mint": "tsx implementations/auth/smoke/environment-manager-bootstrap-mint.smoke.ts",
     "smoke:manager-run-owned-agents": "tsx implementations/manager/smoke/run-owned-agents.smoke.ts"
   },
   "dependencies": {

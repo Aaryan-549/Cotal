@@ -85,6 +85,61 @@ not admit hosted workloads until the host durably binds their manager and child 
 and supports their retirement. Stock provider-local manager bootstrap and cross-uid seat
 isolation also remain upstream dependencies. Empty-workload probes issue no such authority.
 
+Core provides fixed `environment-bootstrap`, `environment-manager-supervisor`,
+`environment-manager-executor` and `environment-manager-goal-writer` grant builders. They
+require host-selected instance, owner, lifecycle and authority coordinates, and a current
+explicit credential expiry bounded by admission. They confer no guest auth-store access.
+The optional endpoint-gate `authorityFamily` marker survives native registration and mint
+CAS operations; raw write exclusion, not a field parser, protects it from guests. These
+primitives do not implement admission, the authority endpoint or stock manager bootstrap.
+The existing auth-service manager authority path refuses gates marked `environment-manager`.
+An explicit ordinary manager-caller selection also refuses that family. Automatic selection
+excludes its gates, including unregistered ones, so they do not count as ordinary candidates
+or prevent selection of an ordinary manager.
+Ordinary preparation reserves an unmarked native gate before releasing direct-store manager
+credentials. A racing environment admission must win that same create-only reservation; it
+cannot adopt an instance already prepared by the ordinary path. This family reservation is
+separate from the registration and credential-issuance fences.
+The auth package's internal pre-issuance reservation step stages immutable host coordinates
+under `stage.<opId>.environment-manager`, activates the bootstrap alias at the reserved UID,
+creates the marked manager gate open, and freezes it under the original registration operation.
+The initial open gate revision is recorded under `stage.<opId>.environment-manager-gate`
+before its first freeze. Same-input retries preserve the live registration reservation, but
+cannot re-freeze an aborted gate under that operation, even when its counters remain unchanged.
+The host must bind one operation to each manager instance before calling this step and must
+not substitute a new operation after abort. This step does not detect that substitution.
+Unstamped prior state is unsupported and can be restored after an abort with unchanged counters.
+Changed input, ordinary or foreign gates, completed registrations and deletion markers refuse.
+Its host-private writer grants explicit staging suffixes in addition to lifecycle and manager
+gate rows. This reservation step is not exported as an admission API and issues no credential.
+The internal immutable admission index binds a host-confirmed provider reference, creator,
+profile digest, expiry, account and authority context before selecting a manager instance,
+lifecycle and operation. Same-source retries return the stored coordinates and native revision;
+changed sources and deletion markers refuse. Its dedicated private KV must use file storage,
+history one, no expiry, leader reads and no rollups, mirrors, sources or republishing.
+Per-subject discard-new makes each binding key write-once. Native deny-delete and deny-purge
+prevent message erasure. The boundary refuses a store missing any of these settings.
+The private custody grant creates that store and reads or writes its binding keys, with no
+lifecycle or auth-store access. It cannot replace a stored binding while that shape holds.
+Stream deletion and configuration updates remain operator boundaries; no shipped index-holder
+credential has those APIs. An operator can temporarily weaken write-once, expiry or republish
+settings and restore them after replacing, losing or exposing rows. A reopened shape check
+cannot detect that history. Privacy holds at the data-account boundary; a holder that can create
+streams in that account can source their data. Subject permissions cannot confine metadata read
+payloads, so custody remains trusted host authority, never a guest credential.
+The index does not authenticate a guest, verify provider confirmation or authorize a workload.
+An internal one-shot bootstrap issuer requires the staged admission, initial-gate stamp and
+original frozen registration. It signs only the fixed bootstrap profile for a supplied public
+nkey, with expiry bounded by five minutes and admission. The native credential ledger binds
+that JWT's expiry and bootstrap principal to the reserved lifecycle. Separate registration and
+lifecycle CAS fences must both win before material returns; a lost fence revokes its staged row.
+The issuer records public signing coordinates under `stage.<opId>.environment-bootstrap-mint`.
+A repeated or ambiguous attempt stays held, including after reconstruction. This helper does
+not deliver a private file or redeem bootstrap requests and is not exported from the package.
+External admission, required host policies, issuance recovery, file custody and terminal
+retirement still need their composition.
+Do not substitute these primitives for missing host policies or claim a runnable hosted manager.
+
 Supervise the cleanup task independently of any operator session. It resumes recorded
 destruction requests and expired environments after a host restart. Monitor its failure
 promise and its per-record reports. An unavailable store or a provider create whose reply

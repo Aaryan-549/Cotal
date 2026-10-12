@@ -227,6 +227,8 @@ jobs:
           herdr --version
       - name: Build
         run: pnpm build
+      - name: Web console auth
+        run: pnpm smoke:web-console-auth
       # Broker-free boundary/preflight guards + the live target-resolution / spawn-from-anywhere /
       # readiness / up-stack / up-manifest / ext / dogfood e2es (real broker, real agents).
       - name: Core boundary, mesh preflight & resolution
@@ -259,6 +261,8 @@ jobs:
         run: pnpm smoke:cmux
       - name: OpenCode cooperative-stop smoke test
         run: pnpm smoke:opencode-coop
+      - name: Transport liveness unit baseline
+        run: pnpm smoke:transport-liveness
 
   # Native linux-x64 and linux-arm64 SO_PEERCRED helpers, then one pack on x64
   # that assembles BOTH into the tarball the ARM load job consumes unchanged.
