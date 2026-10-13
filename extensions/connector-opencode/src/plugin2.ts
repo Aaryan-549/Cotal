@@ -26,7 +26,7 @@ import {
   WORKFLOW_STEER,
 } from "@cotal-ai/connector-core";
 import { modelRefusalSentence, computeInjection, settleWithin } from "./plugin.js";
-import type { OpenCode2Context } from "./opencode2-types.js";
+import type { OpenCode2Context, OpenCode2Event } from "./opencode2-types.js";
 import { buildCotalTools2 } from "./tools.js";
 
 function log(msg: string): void {
@@ -152,6 +152,8 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
   let primed = false; // persona goes out as `system` on the first connector-submitted turn, once
   let briefed = false; // channel briefing goes out once, same rule as 1.x
   let surfaced: string[] = []; // receive keys surfaced into the current turn, acked on completion
+  let ended: OpenCode2Event["durable"]; // log position of the event that ended the last turn
+  let submitting: Promise<void> | undefined; // the prompt POST in flight; what it carries settles when it answers
 
   /** Create the session this agent owns and announce its id to the serve shim, exactly as
    *  plugin.ts's `sessionReady` does (the shim scans stderr for this exact line to find which
@@ -216,10 +218,10 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
    *  a running turn (busy), matching 1.x's coalesce-avoidance. `override` is a bare nudge body (a
    *  focus @mention pull); it surfaces nothing to ack. */
   async function drive(override?: string): Promise<void> {
-    if (busy) return;
+    if (busy || submitting) return;
     const id = await ensureSession();
     if (!id) return; // no visible session yet — the boot task above retries via sessionReady
-    if (busy) return; // rechecked after the await, same reason as plugin.ts's `drive`
+    if (busy || submitting) return; // rechecked after the await, same reason as plugin.ts's `drive`
     // The floor: while boot text exists and its gate is closed, nothing else goes out (the 1.x
     // boot floor in `drive` without the `pendingWake` slot, which 2.x does not have).
     const boot = bootPending() ? bootPrompt : undefined;
@@ -253,20 +255,61 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
     if (!surface(ids)) return; // at the in-flight ceiling: the batch stays queued for a later turn
     busy = true;
     briefed = true;
-    try {
-      await opencodeApi(
-        `/api/session/${encodeURIComponent(id)}/prompt`,
-        { method: "POST", body: JSON.stringify({ text, ...(system ? { system } : {}) }) },
-        10_000,
-      );
-      if (turnIds.length) agent.commitSurfacedTurns(turnIds);
-      if (system) primed = true;
-      if (boot !== undefined) bootPrompt = undefined;
-    } catch (e) {
-      busy = false;
-      abandonSurfaced();
-      log(`drive failed: ${(e as Error).message}`);
-    }
+    // The turn can end before this POST answers: the event stream is a separate transport. The boot
+    // text, run turns and persona it carries settle only on the answer, so until then no second
+    // submission starts and `completeTurn` waits before it drives; either would send them again.
+    submitting = (async () => {
+      try {
+        await opencodeApi(
+          `/api/session/${encodeURIComponent(id)}/prompt`,
+          { method: "POST", body: JSON.stringify({ text, ...(system ? { system } : {}) }) },
+          10_000,
+        );
+        if (turnIds.length) agent.commitSurfacedTurns(turnIds);
+        if (system) primed = true;
+        if (boot !== undefined) bootPrompt = undefined;
+      } catch (e) {
+        busy = false;
+        abandonSurfaced();
+        log(`drive failed: ${(e as Error).message}`);
+      } finally {
+        submitting = undefined;
+      }
+    })();
+    await submitting;
+  }
+
+  /** Whether an execution event is a replay: at or before the last turn's end in the same session's
+   *  durable log. 2.x gives every execution event that position, so one without it cannot be told
+   *  from a replay and is refused. */
+  function replayed(ev: OpenCode2Event): boolean {
+    const at = ev.durable;
+    if (!at) log(`${ev.type} carries no durable log position; ignored`);
+    return !at || (at.aggregateID === ended?.aggregateID && at.seq <= ended.seq);
+  }
+
+  /** A turn ended: clear `busy`, settle the batch it carried, then drive whatever waited behind it,
+   *  as 1.x's `completeTurn` does. The incoming handler and the boot task decline while a turn runs,
+   *  so nothing else would. The carried batch is left out of the wake count: after a failed turn it
+   *  is still in the inbox, and driving it again here would loop a turn that keeps failing. It goes
+   *  out with the next drive or when the broker redelivers it. A replayed end, or one with no turn
+   *  running, closes nothing: acting on it would resubmit a failed batch, or settle the batch driven
+   *  below before its turn ran. */
+  async function completeTurn(ev: OpenCode2Event, settle: () => void): Promise<void> {
+    if (replayed(ev) || !busy) return;
+    ended = ev.durable;
+    busy = false;
+    const carried = new Set(surfaced);
+    settle();
+    await safeStatus("idle");
+    // Not awaited: the event loop must keep consuming while the POST is unanswered, so a turn that
+    // starts meanwhile sets `busy` and `drive` declines instead of submitting into it.
+    void (async () => {
+      await submitting;
+      if (controller.signal.aborted) return; // teardown began during the wait: a turn driven now would outlive the seat
+      if (ended !== ev.durable) return; // a later turn ended during the wait: only its task leaves out the batch that turn failed
+      if (bootPending() || agent.pendingWake((item) => carried.has(item.recvKey)) > 0) void drive();
+    })();
   }
 
   // Inbound mesh → drive (never interrupt a running turn). Mirrors plugin.ts's `agent.on`
@@ -337,30 +380,25 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
             break;
           }
           case "session.execution.started": {
-            if (sessionID && data.sessionID !== sessionID) break;
+            // A replayed start belongs to a turn whose end already came, so it would hold `busy` for good.
+            if ((sessionID && data.sessionID !== sessionID) || replayed(ev)) break;
             busy = true;
             await safeStatus("working");
             break;
           }
           case "session.execution.succeeded": {
             if (sessionID && data.sessionID !== sessionID) break;
-            busy = false;
-            ackSurfaced(); // our driven turn ended cleanly: ack the surfaced batch (the sole ack site)
-            await safeStatus("idle");
+            await completeTurn(ev, ackSurfaced); // our driven turn ended cleanly: ack the surfaced batch (the sole ack site)
             break;
           }
           case "session.execution.failed": {
             if (sessionID && data.sessionID !== sessionID) break;
-            busy = false;
-            abandonSurfaced(); // leave the inbox unacked so the batch can retry on a later safe turn
-            await safeStatus("idle");
+            await completeTurn(ev, abandonSurfaced); // leave the inbox unacked so the batch can retry on a later safe turn
             break;
           }
           case "session.execution.interrupted": {
             if (sessionID && data.sessionID !== sessionID) break;
-            busy = false;
-            ackSurfaced(); // explicit user Stop: treat the surfaced batch as dismissed, not failed
-            await safeStatus("idle");
+            await completeTurn(ev, ackSurfaced); // explicit user Stop: treat the surfaced batch as dismissed, not failed
             break;
           }
           case "permission.asked": {
