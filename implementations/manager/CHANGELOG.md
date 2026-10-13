@@ -1,5 +1,16 @@
 # @cotal-ai/manager
 
+## 0.81.0
+
+### Patch Changes
+
+- bc6d2b5: The manager now keys each spawn acceptance by its caller and goal id, the identity the goal plane stores the goal under. A second caller that submitted a `spawn` under a goal id another caller had already used was refused as "accepted under a different submission" although its own goal did not exist. Each caller's spawn under that id now gets its own acceptance, and a retry is served the acceptance of the caller that sent it.
+- 0c1c75f: A manager spawn reads the cotal config once and uses that one value for the delegated-runtime refusal of shared MCP servers, the model policy check and the launch's shared servers and `spawn.env` allowlist. Before this the launch read the file again after the presence snapshot, the accept hooks and provisioning, so a config edited in that window admitted the seat under the old model policy and launched it with the new file's servers and env names.
+- Updated dependencies [c166107]
+  - @cotal-ai/core@0.81.0
+  - @cotal-ai/workspace@0.81.0
+  - @cotal-ai/seat@0.81.0
+
 ## 0.80.0
 
 ### Minor Changes
