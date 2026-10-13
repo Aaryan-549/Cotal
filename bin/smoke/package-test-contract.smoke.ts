@@ -15,7 +15,6 @@ const AFFECTED = [
   "@cotal-ai/smoke-kit",
   "@cotal-ai/tmux",
   "@cotal-ai/delivery",
-  "@cotal-ai/environments",
 ] as const;
 
 const WORKSPACE_PACKAGE_DIRS = {
@@ -49,8 +48,6 @@ const WORKSPACE_PACKAGE_DIRS = {
   "@cotal-ai/lang": "packages/lang",
   "@cotal-ai/seat": "packages/seat",
   "@cotal-ai/workspace": "packages/workspace",
-  "@cotal-ai/environments": "implementations/environments",
-  "@cotal-ai/tenki": "extensions/tenki",
 } as const;
 
 const PRIVATE_NO_TESTS = new Set([
