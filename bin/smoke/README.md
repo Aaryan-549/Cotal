@@ -97,11 +97,6 @@ sockets, processes, PTYs, native modules and bundles. It needs no `nats-server` 
 PATH. Broker-backed suites belong in `smoke:ci`, with root scripts and CI fragments.
 Both Linux and Windows smoke jobs install the broker before running those shards.
 
-The environment package's contract checks run in `pnpm test`. Its lifecycle and
-registered-endpoint checks run as `smoke:environment-service` and
-`smoke:environment-wire` in `smoke:ci`. Each starts a real private broker. The package's
-`smoke` command runs both directly and requires `nats-server` on PATH.
-
 ## Packing seat from a checkout
 
 `pnpm build` compiles the `@cotal-ai/seat` helper for the host arch only, and seat's `prepack`
