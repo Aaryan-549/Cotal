@@ -1,5 +1,18 @@
 # @cotal-ai/cli
 
+## 0.81.0
+
+### Patch Changes
+
+- 400b8b8: `cotal down --preserve-state` now refuses a presence row whose `card.id` differs from the key it was
+  read under, with `presence record <subject> is malformed`. A participant may write any value under its
+  own key, so a forged `card.id` naming the manager let a live participant pass the unmanaged-endpoints
+  check, and one naming a retained seat made the lost-manager finish report that seat as still live.
+- 21fe24c: A foreground `cotal spawn` on a static-auth mesh now retires the agent's broker footprint when it fails after provisioning. A failed provisioner stop, secret write or creds file write used to exit with the agent's DM and DLV durables and its read-ACL row left on the broker, with nothing left to remove them. The spawn now records the agent's identity and creds path before it provisions, and the same retirement that follows a failed launch runs before the error is reported.
+- Updated dependencies [c166107]
+  - @cotal-ai/core@0.81.0
+  - @cotal-ai/workspace@0.81.0
+
 ## 0.80.0
 
 ### Patch Changes

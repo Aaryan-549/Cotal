@@ -1,5 +1,16 @@
 # @cotal-ai/connector-opencode
 
+## 0.81.0
+
+### Minor Changes
+
+- a84a620: The OpenCode plugin holds a native prompt behind every turn end still settling on its session, not the latest alone, and a prompt already waiting follows each turn end reported while it waits. A turn that ends twice, by its error and by the idle that follows, had its barrier replaced by the later turn end, whose position read could answer first and delete it while the error's read was still pending, so a prompt typed in that window landed ahead of the error's position and the failed turn closed as a finish with its successor carrying the error; a prompt that arrived between the two ends waited on the first barrier alone and went through once that read answered, ahead of the idle's position.
+
+### Patch Changes
+
+- 37d6f81: The OpenCode 2.x connector refuses a session whose registration requires events, through the same arming decision the other connectors use. It refused only when `COTAL_EVENTS` was set, so launch material carrying `eventsRequired`, or `COTAL_EVENTS_REQUIRED=1` on the user-mode env fallback, started a session with no event plane on a space that requires one.
+- 1617637: On OpenCode 2.x, a message that arrives while a turn runs now goes out as the next turn as soon as that turn succeeds, fails or is interrupted. The adapter used to buffer it and wait for an unrelated arrival to wake the seat, so a role request could outlive its ack wait and be handed to another holder of the role. A boot prompt held back by a running turn goes out at the turn end the same way. When a turn ends before OpenCode answers the request that submitted it, the adapter waits for that answer before it submits again, so the boot prompt or a run turn is not sent twice. A failed turn's own batch is not resubmitted at once, so a turn that keeps failing does not loop. A turn-start or turn-end event that the session's durable event log places at or before the end of the last turn is ignored, as is a turn end with no turn running, so a replayed turn does not hold the seat busy, settle the next turn's messages before that turn runs, or resubmit a failed batch. A turn-start or turn-end event without a log position is ignored and logged, since it cannot be told from a replay.
+
 ## 0.80.0
 
 ### Minor Changes
