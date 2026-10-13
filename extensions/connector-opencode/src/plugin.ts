@@ -238,6 +238,8 @@ export const cotal: Plugin = async () => {
    * a managed session.
    */
   let events: AguiEmitterHolder<OpenCodeRecord> | undefined;
+  /** Per session, the cursor of its end when the connector last reported a turn over. */
+  const turnEndedAt = new Map<string, string>();
   /** This principal's event WAL lock, taken by whichever holder started first and held until the
    *  FINAL event teardown. See the assignment site for why a retirement does not release it. */
   let eventLock: PrincipalLock | undefined;
@@ -274,6 +276,11 @@ export const cotal: Plugin = async () => {
     // mapper, and the two are assigned at different times because the mapper is built inside the
     // factory, keyed on the session the bus names.
     let mapper: OpenCodeMapper | undefined;
+    // ONE source for the holder's lifetime. The holder re-establishes a stopped plane by calling
+    // this factory again, and the boundary captured below is the position the thread adopted at;
+    // a second capture would sit at the re-establish, and every message between the two would be
+    // lost without a word. Same rule as the Claude Code connector's holder.
+    let source: BoundStartSource<OpenCodeRecord> | undefined;
     // Built LAZILY, on the first event that names a session: `start()` reaches the broker, and that
     // work must not run for a session that never emits.
     return new AguiEmitterHolder<OpenCodeRecord>(
@@ -281,20 +288,27 @@ export const cotal: Plugin = async () => {
         // Captured as the FACTORY'S FIRST ACT, before the mesh wait below: a lazily-built source
         // otherwise positions itself on its own first read, which happens only after the mesh wait
         // and everything else this bind does first, and anything the session writes to its message
-        // list in that window is silently dropped. Same rule as the Claude Code connector's holder.
-        const session = new OpenCodeSessionSource({
-          // The SUPPORTED surface. `opencodeApi` is the same authenticated HTTP client the rest of
-          // this plugin uses, and `/session/{id}/message` is the endpoint the SDK's
-          // `session.messages()` calls. The SQLite store behind it is OpenCode's private business
-          // and its schema migrates, so nothing here reads it.
-          read: () => opencodeApi<OpenCodeMessageWithParts[]>(`/session/${encodeURIComponent(id)}/message`, undefined, 30_000),
-          // A revert is a legitimate user action, so the divergence is RECORDED and the stream
-          // continues. The read itself is already correct without this, because the cursor is
-          // compared as an order and never dereferenced as an identity.
-          onVanished: (cursor) => log(`AG-UI: the resume cursor was removed from the session (revert): ${cursor}`),
-        });
-        const boundary = await session.read(undefined);
-        const source = new BoundStartSource(session, boundary.cursor);
+        // list in that window is silently dropped.
+        const bound =
+          source ??
+          (source = await (async () => {
+            const session = new OpenCodeSessionSource({
+              // The session's end when its turn was last reported over: a part still filling then
+              // is settled by that, not by marks it will never get.
+              endedAt: () => turnEndedAt.get(id),
+              // The SUPPORTED surface. `opencodeApi` is the same authenticated HTTP client the rest
+              // of this plugin uses, and `/session/{id}/message` is the endpoint the SDK's
+              // `session.messages()` calls. The SQLite store behind it is OpenCode's private
+              // business and its schema migrates, so nothing here reads it.
+              read: () => opencodeApi<OpenCodeMessageWithParts[]>(`/session/${encodeURIComponent(id)}/message`, undefined, 30_000),
+              // A revert is a legitimate user action, so the divergence is RECORDED and the stream
+              // continues. The read itself is already correct without this, because the cursor is
+              // compared as an order and never dereferenced as an identity.
+              onVanished: (cursor) => log(`AG-UI: the resume cursor was removed from the session (revert): ${cursor}`),
+            });
+            const boundary = await session.read(undefined);
+            return new BoundStartSource(session, boundary.cursor);
+          })());
         // WAIT FOR THE MESH FIRST. This factory runs off the first `session.created` on the bus,
         // and the shim creates that session before the mesh link binds, so `AguiEmitter.start`
         // reached an endpoint that had not started and the holder died terminally for the rest of
@@ -328,17 +342,33 @@ export const cotal: Plugin = async () => {
         // expects an empty subject its own first session filled, and halts for good.
         const subjectFrontier = await FileSubjectFrontier.open(subjectPath, { space: config.space, principal });
         const wal = await EventWal.open(walPath, { space: config.space, threadId, principal, subjectMayExist: false });
-        mapper = createOpenCodeMapper({ threadId, mintRunId: () => randomUUID() });
+        // Seeded from the bracket state that will exist AFTER `start` settles a pending frame: a
+        // re-established plane starts with the log's run open, and a mapper that opened with none
+        // would drop every record until the next prompt, whose `RUN_STARTED` the brackets refuse.
+        const resumeRunId = wal.pending === null ? wal.brackets?.run : wal.pending.brackets.run;
+        mapper = createOpenCodeMapper({ threadId, mintRunId: () => randomUUID(), resumeRunId });
         return AguiEmitter.start<OpenCodeRecord>({
           endpoint: agent.ep,
           wal,
           subjectFrontier,
-          source,
+          source: bound,
           map: mapper.map,
+          onUnreadable: (gap) => log(`AG-UI source: skipped an unreadable session record at offset ${gap.offset} (${gap.bytes} bytes): ${gap.reason}`),
         });
       },
       {
-        onError: eventPlaneStopped({ required: config.eventsRequired === true, log, stopSeat: () => void shutdown(1) }),
+        onError: eventPlaneStopped({ log }),
+        // The session's end when `session.idle` or `session.error` reports the turn over: what
+        // names the turn a terminal held through an outage ends.
+        sourceEnd: async (sessionId: string) => {
+          const end = await new OpenCodeSessionSource({
+            read: () => opencodeApi<OpenCodeMessageWithParts[]>(`/session/${encodeURIComponent(sessionId)}/message`, undefined, 30_000),
+          }).end();
+          // Recorded for the session's source: every record at or before this end belongs to a
+          // turn that has ended, and is read as settled whatever its own marks say.
+          turnEndedAt.set(sessionId, end);
+          return end;
+        },
         // The turn terminal closes a run the record stream never described, so without this the
         // mapper would still believe that run is open, attribute the next records to it, and have
         // the batch refused. Keyed on the id, so a newer run opened in between is left alone.
@@ -1117,6 +1147,23 @@ export const cotal: Plugin = async () => {
     return true;
   }
 
+  /**
+   * The turn end a session is still settling: the close whose position read has not answered. A
+   * next turn admitted before it answers puts the terminal after that turn's records, so every
+   * path that admits one waits here first: the event arms for the driven turn, and the prompt hook
+   * for a native one typed into the TUI or posted to the server.
+   */
+  const turnEnds = new Map<string, Promise<void>>();
+  const turnEnded = async (session: string | undefined, close: Promise<void> | undefined): Promise<void> => {
+    if (!close) return;
+    if (session === undefined) return close; // a session-less error names no session for a prompt to wait on
+    const settled = close.finally(() => {
+      if (turnEnds.get(session) === settled) turnEnds.delete(session);
+    });
+    turnEnds.set(session, settled);
+    await settled;
+  };
+
   /** Native TUI / API prompts enter through OpenCode's chat.message hook before the model loop
    *  starts. This is the real "next turn" boundary for human-typed input: prepend the buffered Cotal
    *  batch to the user's text, then ack it when the resulting turn ends. We only mutate an existing
@@ -1354,7 +1401,13 @@ export const cotal: Plugin = async () => {
           // Both land on the holder's chain in the order they were enqueued, so closing first would
           // terminate a run the records that follow still belong to.
           eventsFor(sessionID)?.flush(sessionID);
-          eventsFor(sessionID)?.closeRun(Date.now());
+          // The close's position read is awaited BEFORE the next turn is admitted, on every path
+          // that admits one: this arm for the driven turn, and the prompt hook for a native one.
+          // The position is the session's messages over HTTP, and a next prompt that lands before
+          // that read answers puts the terminal after the next turn's records, which closes that
+          // turn with it (Sol, rounds 14 and 15 of 2026-10-13, through the built plugin: a failed
+          // turn closed as a finish and its successor as the error).
+          await turnEnded(idleSession, eventsFor(sessionID)?.closeRun(Date.now()));
           await safeStatus("idle");
           completeTurn(); // the sole turn-end site: ack-on-surface + drive the next batch
           break;
@@ -1404,7 +1457,8 @@ export const cotal: Plugin = async () => {
           // so a reader can tell it from a turn that finished; an interrupted one closes with no
           // outcome, which says the run ended and does not claim it succeeded. `RUN_ERROR` closes a
           // run by itself, so no second terminal follows it.
-          eventHolder?.closeRun(Date.now(), interrupted ? undefined : runErrorOf(event.properties.error));
+          // Awaited for its position read, as the idle arm does, before the next turn is admitted.
+          await turnEnded(sessionID, eventHolder?.closeRun(Date.now(), interrupted ? undefined : runErrorOf(event.properties.error)));
           busy = false;
           if (awaitingTurnEnd) {
             awaitingTurnEnd = false;
@@ -1468,6 +1522,10 @@ export const cotal: Plugin = async () => {
     "chat.message": async (input, output) => {
       if (stopping) throw new Error("the prompt was not run: this seat is shutting down");
       if (!ours(input.sessionID)) return;
+      // A NATIVE PROMPT WAITS FOR THE TURN END STILL SETTLING. OpenCode awaits this hook before it
+      // saves the user message, so a prompt held here lands after the close's position read has
+      // answered, and the terminal keeps its own turn.
+      await turnEnds.get(input.sessionID);
       // OpenCode exposes the selected model only on this prompt hook. Do not invent a pre-turn
       // default: before the first prompt the dashboard truthfully shows "not reported".
       if (input.model)

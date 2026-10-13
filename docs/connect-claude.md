@@ -362,11 +362,40 @@ A hand-driven user-mode session may carry the same decision as `COTAL_EVENTS_REQ
 publish grant must cover `events.<owner>.<actor>` or the connector refuses before joining. An unmanaged
 session with no launch material and no required-policy fallback keeps the generic default behavior.
 
-If the event plane stops for good, the space's policy decides what happens to the seat, on every
-connector. On a space that requires events the seat stops and leaves the mesh. On any other space
-it keeps running without events, and the connector log records `AG-UI emitter stopped` with the
-reason. For Claude Code the connector is the MCP server: it leaves the mesh and exits with code 1,
-and its stderr carries that line.
+If the event plane stops, the seat keeps running and its mesh connection, on every connector and
+on every space. The connector log records `AG-UI emitter stopped` with the reason and the delay
+before it re-establishes the plane: at once after a failure, then every second while the plane
+stays down, a fixed wait that neither grows nor is capped, so the plane is back within a second
+of the fault clearing. The re-establish
+is a fresh start: it reopens the write-ahead log, settles any frame it left pending, builds the
+mapper from the run the log has open, and reads on from the stored cursor, which is the same
+recovery a connector restart runs. A failed publish or a failed log write is never retried on the
+emitter it failed on. A turn that ends while the plane is down keeps its terminal, and so does a
+turn whose terminal's own log write failed: once the re-establish has read on, the run the log had
+open is closed with that terminal, a failure as a failure, rather than left open for the next
+prompt to close as a finish. That holds when the next prompt was already written before the plane
+came back: the failure is published after the failed turn's own records and before the next run
+opens, in a frame of the failed run, since a run error names no run and the frame is its only
+attribution. Every turn that ends while the plane is down keeps its own terminal. A terminal belongs
+to the last turn the transcript had begun when its hook fired: the connector reports a turn's
+terminal once that turn's records are written and before the next turn's are, so the position the
+transcript has reached at the hook names the turn, including a turn the connector opens no run for,
+such as a task notification, which takes its terminal and publishes nothing. A terminal repeated
+for a turn that has one replaces nothing and is kept for no later turn. A line the connector cannot
+read, written past that position while the plane was down, does not hold the terminal: the
+re-establish reports the gap and places the terminal after the records before it. A record no read
+answers, such as an OpenCode part still filling when its turn died, holds it no more: the terminal
+is placed after the records before it, and the turn end reads the session once rather than without end. The OpenCode source reads every record at or before the end it reported at a turn end as settled, so a part left filling by a failed turn does not stop the turns after it from publishing. A terminal reported while the first start is still waiting on the broker reaches the emitter before its first read, so a prompt written in that window does not close the failed turn as a finish. The same placement runs with
+the plane up: a terminal reported while the flush before it is still reading, with the next prompt
+written before that read, closes its own turn in the place of the finish that prompt synthesizes. The seat used to exit on a space that requires events; for Claude Code the
+connector is the MCP server, so that exit showed as the server disconnecting, and Claude Code
+restarted it on the next tool call.
+
+A transcript line that is not a record does not stop the plane. Claude writes the transcript, and a
+write cut short by a full disk leaves part of one record glued to the next on a single line, which
+never becomes readable. The connector steps over that line, keeps the records after it, and writes
+`skipped an unreadable transcript record at offset <offset> (<bytes> bytes)` with the parser's
+reason to its stderr.
 
 A new session includes its first run even when Claude writes a positional startup prompt before the
 connector receives `SessionStart`. That from-zero read is keyed only to Claude's explicit
@@ -480,9 +509,11 @@ open when the session stopped is closed rather than left dangling.
 
 A delayed initial connection or a broker reconnect pauses event publication without closing MCP.
 The recorder waits for both the mesh binding and its transport; unpublished records stay in the
-transcript until the connection recovers. Stopping the connector cancels that wait. Recording errors,
-including a conflicting transcript or damaged event state, still stop a session whose policy requires
-recording.
+transcript until the connection recovers. Stopping the connector cancels that wait. A recording error,
+including a conflicting transcript or damaged event state, stops the publishing plane and not the
+session: it is reported with the delay before the next re-establish, on every space, and the seat keeps
+its mesh connection. A second transcript path offered to a bound recorder is refused the same way, and
+the first path stays bound.
 
 One channel carries **every session of one agent**, because it is named after the principal and not
 after the session. Alongside the per-session logs the connector keeps one small record per principal,

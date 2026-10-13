@@ -3,9 +3,11 @@ import { mkdtemp, writeFile, appendFile, rm, rename, symlink } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AguiBrackets, JsonlFileSource } from "@cotal-ai/connector-core";
-import { JcodeJournalSource } from "../src/agui-source.js";
+import { JcodeJournalSource, positionedJcodeJournalSource } from "../src/agui-source.js";
 import { createJcodeMapper, type JcodeJournalRecord } from "../src/agui-map.js";
 
+/** The unit a record mapped to, or `null`: a turn the mapper opens no run for maps to none. */
+const unitOf = <U extends { runId: string }>(r: U | { turn: true } | null): U | null => (r !== null && "runId" in r ? r : null);
 const root = await mkdtemp(join(tmpdir(), "jcode-checkpoint-"));
 let checked = 0, failed = 0;
 const check = async (name: string, run: () => Promise<void>) => {
@@ -25,11 +27,11 @@ try {
     const mapper = createJcodeMapper({ threadId: "open", mintRunId: () => "run-open" });
     const brackets = new AguiBrackets();
     const first = await source.read(undefined);
-    for (const r of first.records) for (const e of mapper.map({ cursor: r.cursor, record: r.value })?.events ?? []) brackets.accept(e);
+    for (const r of first.records) for (const e of unitOf(mapper.map({ cursor: r.cursor, record: r.value }))?.events ?? []) brackets.accept(e);
     await snapshot("open");
     await writeFile(path, "");
     const next = await source.read(first.cursor);
-    const events = next.records.flatMap(r => mapper.map({ cursor: r.cursor, record: r.value })?.events ?? []);
+    const events = next.records.flatMap(r => unitOf(mapper.map({ cursor: r.cursor, record: r.value }))?.events ?? []);
     for (const e of events) brackets.accept(e);
     assert(events.some(e => e.type === "RUN_ERROR" && e.code === "jcode_journal_fold"));
     assert(!events.some(e => e.type === "RUN_FINISHED"));
@@ -46,7 +48,7 @@ try {
     const next = await source.read(first.cursor);
     const mapper = createJcodeMapper({ threadId: "unseen", mintRunId: () => "run-unseen" });
     const brackets = new AguiBrackets();
-    const events = next.records.flatMap(r => mapper.map({ cursor: r.cursor, record: r.value })?.events ?? []);
+    const events = next.records.flatMap(r => unitOf(mapper.map({ cursor: r.cursor, record: r.value }))?.events ?? []);
     for (const e of events) brackets.accept(e);
     assert(events.some(e => e.type === "RUN_ERROR" && e.code === "jcode_tool_start_missing"));
     assert(!events.some(e => e.type === "TOOL_CALL_END" || e.type === "TOOL_CALL_START" || e.type === "RUN_FINISHED"));
@@ -72,10 +74,10 @@ try {
   await check("restart restores open tool observations without manufacturing a gap", async () => {
     const before = createJcodeMapper({ threadId: "restart", mintRunId: () => "run-restart" });
     const brackets = new AguiBrackets();
-    for (const e of before.map({ cursor: "before", record: { append_messages: [start] } })!.events) brackets.accept(e);
+    for (const e of unitOf(before.map({ cursor: "before", record: { append_messages: [start] } }))!.events) brackets.accept(e);
     const saved = brackets.snapshot();
     const restored = createJcodeMapper({ threadId: "restart", mintRunId: () => "unexpected", resumeRunId: saved.run, resumeTools: saved.tools });
-    const events = restored.map({ cursor: "after", record: { append_messages: [result] } })!.events;
+    const events = unitOf(restored.map({ cursor: "after", record: { append_messages: [result] } }))!.events;
     assert.deepEqual(events.map(e => e.type), ["TOOL_CALL_END"]);
     for (const e of events) brackets.accept(e);
     assert.deepEqual(brackets.snapshot().tools, []);
@@ -125,7 +127,17 @@ try {
     const first = await source.read(undefined);
     await snapshot("invalid");
     await appendFile(path, "not-json\n");
-    await assert.rejects(source.read(first.cursor));
+    // The invalid line is stepped over and NAMED, never read as the snapshot and never silent:
+    // the read carries it as a gap with the fixed reason, and no record for it.
+    const read = await source.read(first.cursor);
+    assert.equal(read.records.length, 0);
+    assert.equal(read.unreadable?.length, 1, "the invalid complete line is reported as a gap");
+    assert.equal(read.unreadable?.[0]?.reason, "not a JSON record");
+    // The positioned wrapper the host feeds the emitter carries the gap through unchanged. A
+    // wrapper that rebuilt the read without it advanced the emitter past the line with nothing
+    // reported and nothing refused.
+    const positioned = await positionedJcodeJournalSource(source).read(first.cursor);
+    assert.deepEqual(positioned.unreadable, read.unreadable, "the positioned wrapper carries the gap");
   });
   await check("a same-size snapshot checkpoint is not mistaken for an append-only journal", async () => {
     const path = join(root, "same.journal.jsonl");

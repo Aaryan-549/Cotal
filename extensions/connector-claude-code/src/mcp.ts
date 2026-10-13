@@ -31,6 +31,8 @@ import {
   resolveEventsStateRoot,
   controlFromEnv,
   NO_TOOL_ARGS,
+  JsonlFileSource,
+  type DurableSource,
 } from "@cotal-ai/connector-core";
 import { principalKey } from "@cotal-ai/core";
 import { randomUUID } from "node:crypto";
@@ -136,6 +138,11 @@ async function main(): Promise<void> {
     // The channel is derived inside the emitter from the endpoint's OWN principal, never from
     // `config.name`, so the subject the broker enforces a grant against and the subject this
     // publishes to are computed from the identity the connection authenticates as.
+    // ONE source for the holder's lifetime. The holder re-establishes a plane that stopped by
+    // calling this factory again, and the boundary a bound source captured on the first call is
+    // the position the thread adopted at; a second source would capture a second boundary, at the
+    // re-establish, and every record between the two would be lost without a word.
+    let source: DurableSource<ClaudeEntry> | undefined;
     events = new AguiEmitterHolder<ClaudeEntry, unknown>(
       async (transcriptPath: string, sessionSource: unknown) => {
         // Captured as the FACTORY'S FIRST ACT, before the mesh wait below and before anything else
@@ -143,7 +150,7 @@ async function main(): Promise<void> {
         // which happens only after the mesh wait, and anything the session writes to the transcript
         // in that window is silently dropped. `fork` runs its own file-appear wait inside this same
         // call and still substitutes its boundary exactly once. `startup` needs no boundary.
-        const source = await createBoundClaudeTranscriptSource(transcriptPath, sessionSource);
+        const boundSource = (source ??= await createBoundClaudeTranscriptSource(transcriptPath, sessionSource));
         const startEmitter = async () => {
           // The events state root throws rather than defaulting to the working directory: a WAL
           // written somewhere no later start looks is a silent loss.
@@ -174,13 +181,28 @@ async function main(): Promise<void> {
           // subject that already has one, the broker refuses it, and the emitter halts.
           const wal = await EventWal.open(walPath, { space: config.space, threadId, principal, subjectMayExist: false });
 
-          mapper = createClaudeMapper({ threadId, mintRunId: () => randomUUID() });
+          // Seeded from the bracket state that will exist AFTER `start` settles a pending frame,
+          // not from the folded state before it: a pending terminal closes the log's run without
+          // passing through this mapper. A re-established plane starts here with the log's run
+          // open; a mapper that opened with none would drop every assistant record until the
+          // next prompt, whose `RUN_STARTED` the brackets then refuse.
+          const resumeRunId = wal.pending === null ? wal.brackets?.run : wal.pending.brackets.run;
+          mapper = createClaudeMapper({ threadId, mintRunId: () => randomUUID(), resumeRunId });
           return AguiEmitter.start<ClaudeEntry>({
             endpoint: agent.ep,
             wal,
             subjectFrontier,
-            source,
+            source: boundSource,
             map: mapper.map,
+            // Claude writes the transcript, and a write it cut short (a full disk) leaves part of
+            // one record glued to the next on a single line that never becomes readable. That line
+            // is stepped over and named here; halting on it ended the plane, and on a space that
+            // requires events the seat with it, for good at that byte, on every restart.
+            onUnreadable: (gap) =>
+              process.stderr.write(
+                `[cotal-connector] AG-UI source: skipped an unreadable transcript record at offset ${gap.offset} ` +
+                  `(${gap.bytes} bytes): ${gap.reason}\n`,
+              ),
           });
         };
 
@@ -190,11 +212,10 @@ async function main(): Promise<void> {
         return startEmitter();
       },
       {
-        onError: eventPlaneStopped({
-          required: config.eventsRequired === true,
-          log: (line) => process.stderr.write(`[cotal-connector] ${line}\n`),
-          stopSeat: () => void shutdown(1),
-        }),
+        onError: eventPlaneStopped({ log: (line) => process.stderr.write(`[cotal-connector] ${line}\n`) }),
+        // The transcript's end when a Stop or StopFailure hook fires: what names the turn a terminal
+        // held through an outage ends.
+        sourceEnd: (transcriptPath: string) => new JsonlFileSource(transcriptPath).end(),
         // The turn terminal closes a run the record stream never described, so the mapper still
         // believes that run is open. Without this it would attribute the next records to a run the
         // published stream has already finished and the emitter would refuse the batch. Keyed on

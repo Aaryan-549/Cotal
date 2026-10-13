@@ -330,6 +330,10 @@ class BoundStartSource<T> implements DurableSource<T> {
   read(cursor: string | undefined): Promise<SourceRead<T>> {
     return this.inner.read(cursor ?? this.start);
   }
+
+  end(): Promise<string> {
+    return this.inner.end();
+  }
 }
 
 export async function runCodexHost(): Promise<void> {
@@ -447,6 +451,7 @@ export async function runCodexHost(): Promise<void> {
             subjectFrontier,
             source,
             map: mapper.map,
+            onUnreadable: (gap) => log(`AG-UI source: skipped an unreadable rollout record at offset ${gap.offset} (${gap.bytes} bytes): ${gap.reason}`),
           });
           // #705: persist the boundary THE SOURCE SUBSTITUTES into the log right after a successful
           // start, and only when the log still has no cursor. Keyed on the wrapper itself, never on
@@ -466,7 +471,8 @@ export async function runCodexHost(): Promise<void> {
           return em;
       },
       {
-        onError: eventPlaneStopped({ required: config.eventsRequired === true, log, stopSeat: () => void shutdown(1) }),
+        onError: eventPlaneStopped({ log }),
+        sourceEnd: (rolloutPath: string) => new JsonlFileSource<CodexRecord>(rolloutPath).end(),
         // A turn terminal closes a run the record stream never described. Without this the mapper
         // would attribute the next records to a run the published stream has already finished.
         onRunClosed: (runId: string) => mapper?.forgetOpenRun(runId),

@@ -59,6 +59,10 @@ export class JcodeJournalSource implements DurableSource<JcodeJournalRecord> {
     this.file = new JsonlFileSource<JcodeJournalRecord>(path);
   }
 
+  end(): Promise<string> {
+    return this.file.end();
+  }
+
   async read(cursor: string | undefined): Promise<SourceRead<JcodeJournalRecord>> {
     if (cursor !== undefined) {
       try {
@@ -152,6 +156,7 @@ export function positionedJcodeJournalSource(
 ): DurableSource<PositionedJcodeJournalRecord> {
   return {
     kind: source.kind,
+    end: () => source.end(),
     async read(cursor) {
       const read = await source.read(cursor);
       return {
@@ -160,6 +165,10 @@ export function positionedJcodeJournalSource(
           cursor: record.cursor,
           value: { cursor: record.cursor, record: record.value },
         })),
+        // The gaps the reader stepped over travel with the read. A wrapper that rebuilt the read
+        // without them advanced the emitter past an unreadable line with nothing reported and
+        // nothing refused, which is the one answer the reader's gap exists to rule out.
+        ...(read.unreadable ? { unreadable: read.unreadable } : {}),
       };
     },
   };

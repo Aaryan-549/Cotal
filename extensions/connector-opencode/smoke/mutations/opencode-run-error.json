@@ -31,10 +31,10 @@
     {
       "name": "O1 a failed turn closes exactly as a finished one does, which is the state this connector shipped in",
       "file": "extensions/connector-opencode/src/plugin.ts",
-      "find": "          eventHolder?.closeRun(Date.now(), interrupted ? undefined : runErrorOf(event.properties.error));",
-      "replace": "          eventHolder?.closeRun(Date.now());",
+      "find": "          await turnEnded(sessionID, eventHolder?.closeRun(Date.now(), interrupted ? undefined : runErrorOf(event.properties.error)));",
+      "replace": "          await turnEnded(sessionID, eventHolder?.closeRun(Date.now()));",
       "expectRed": "fail:and that close is RUN_ERROR, not RUN_FINISHED",
-      "cell": "fail:and that close is RUN_ERROR, not RUN_FINISHED — THE DEFECT",
+      "cell": "fail:and that close is RUN_ERROR, not RUN_FINISHED \u2014 THE DEFECT",
       "note": "The pre-fix line, restored verbatim. An APIError turn is published as a run that ended, carrying no outcome, and a reader cannot tell it from a turn that succeeded."
     },
     {
@@ -43,8 +43,39 @@
       "find": "interrupted ? undefined : runErrorOf(event.properties.error)",
       "replace": "runErrorOf(event.properties.error)",
       "expectRed": "abort:and THAT close is RUN_FINISHED",
-      "cell": "abort:and THAT close is RUN_FINISHED — a Stop is not a failed turn, and a blanket mapping would fail here",
+      "cell": "abort:and THAT close is RUN_FINISHED \u2014 a Stop is not a failed turn, and a blanket mapping would fail here",
       "note": "The plausible over-reach rather than a contrived one: the guard reads like a special case until you notice a user cancellation arrives on the same event."
+    },
+    {
+      "name": "O3 the error arm returns before the terminal's position read answers",
+      "file": "extensions/connector-opencode/src/plugin.ts",
+      "find": "          await turnEnded(sessionID, eventHolder?.closeRun(Date.now(), interrupted ? undefined : runErrorOf(event.properties.error)));\n",
+      "replace": "          void turnEnded(sessionID, eventHolder?.closeRun(Date.now(), interrupted ? undefined : runErrorOf(event.properties.error)));\n",
+      "expectRed": "barrier:the error arm is still in flight while the terminal's position read is held",
+      "note": "The round-14 defect: the next turn was admitted before the position read answered, and the terminal named the next turn."
+    },
+    {
+      "name": "O4 the idle arm returns before the terminal's position read answers",
+      "file": "extensions/connector-opencode/src/plugin.ts",
+      "find": "          await turnEnded(idleSession, eventsFor(sessionID)?.closeRun(Date.now()));\n",
+      "replace": "          void turnEnded(idleSession, eventsFor(sessionID)?.closeRun(Date.now()));\n",
+      "expectRed": "barrier:the idle arm is still in flight while the terminal's position read is held"
+    },
+    {
+      "name": "O5 a native prompt passes the turn end still settling",
+      "file": "extensions/connector-opencode/src/plugin.ts",
+      "find": "      await turnEnds.get(input.sessionID);\n",
+      "replace": "      void turnEnds.get(input.sessionID);\n",
+      "expectRed": "barrier:a native prompt is held while the terminal's position read is held",
+      "note": "The round-15 defect: the driven path waited for the close's position read and the prompt typed into the TUI did not, so a failed turn closed as a finish and its successor as the error."
+    },
+    {
+      "name": "O6 a record at or before the reported turn end is settled only by its own marks",
+      "file": "extensions/connector-opencode/src/agui-source.ts",
+      "find": "      if (!this.settled(r)) break;\n",
+      "replace": "      if (!isSettled(r)) break;\n",
+      "expectRed": "unsettled:the turn after it is published, so the session is not wedged behind the unfinished part",
+      "note": "The round-16 defect: a part still filling when its turn died never gets its end mark and its message never reports completed, so every later read stopped at it and no later turn was published."
     }
   ]
 }

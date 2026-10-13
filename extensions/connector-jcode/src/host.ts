@@ -488,14 +488,13 @@ export async function runJcodeHost(): Promise<void> {
             subjectFrontier,
             source: positionedJcodeJournalSource(new JcodeJournalSource(journalPath)),
             map: mapper.map,
+            onUnreadable: (gap) =>
+              writeJcodeDiagnostic(`[cotal-jcode] AG-UI source: skipped an unreadable journal record at offset ${gap.offset} (${gap.bytes} bytes): ${gap.reason}\n`),
           });
         },
         {
-          onError: eventPlaneStopped({
-            required: config.eventsRequired === true,
-            log: (line) => writeJcodeDiagnostic(`[cotal-jcode] ${line}\n`),
-            stopSeat: () => void shutdown(1),
-          }),
+          onError: eventPlaneStopped({ log: (line) => writeJcodeDiagnostic(`[cotal-jcode] ${line}\n`) }),
+          sourceEnd: (journalPath: string) => new JcodeJournalSource(journalPath).end(),
           onRunClosed: (runId: string) => mapper?.forgetOpenRun(runId),
           // #1868: a flush landing in a mesh rebuild window measured `max_payload` off a connection
           // that was not there and killed the seat. The holder now rides the window out on this
