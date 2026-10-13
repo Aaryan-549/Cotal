@@ -223,6 +223,12 @@ export function createClaudeHandle(deps: ClaudeHandleDeps = {}): ClaudeHooks {
   let pendingTool: { name: string; detail: string } | undefined;
   /** SessionStart can arrive during an open turn, including after compaction. */
   let turnOpen = false;
+  /** A Notification raised a prompt in this turn that no main-agent tool batch has resolved yet. Kept
+   *  here rather than read off `agent.status`: relays overlap, and a batch that arrives while the
+   *  `waiting` write is still in flight would read `working` and miss the wait it resolves. It opens
+   *  only inside a turn and every terminal closes it, so a batch relayed after one cannot bring the
+   *  seat back. */
+  let promptOpen = false;
   /** Batches awaiting a delivery verdict, keyed by the EVENT OBJECT the control server passes to
    *  both `handle` and `onReply`. Frames are separate socket connections and can overlap (a
    *  `PreToolUse` from a parallel tool batch while a `UserPromptSubmit` reply is still being
@@ -337,6 +343,7 @@ export function createClaudeHandle(deps: ClaudeHandleDeps = {}): ClaudeHooks {
         case "UserPromptSubmit": {
           turnOpen = true;
           pendingTool = undefined; // new turn — the previous block (if any) is resolved
+          promptOpen = false;
           flushEvents(ev.transcript_path);
           await safeStatus(agent, "working");
           // Run turns ride the same frame as peer messages: this is an injectable boundary, and
@@ -351,6 +358,15 @@ export function createClaudeHandle(deps: ClaudeHandleDeps = {}): ClaudeHooks {
           pendingTool = toolDetail(ev.tool_name, ev.tool_input);
           flushEvents(ev.transcript_path); // near-live: each tool boundary ships the turn so far
           return {};
+        case "PostToolBatch":
+          // Every tool in the batch resolved, so a prompt raised during it was answered and the turn
+          // went on. Left `waiting`, its Stop would be `waiting → idle`, which is no turn boundary:
+          // the run turn never yields and the condition outlives the turn. `working` also clears it.
+          // A subagent's batch carries `agent_id` and answers nothing the main agent is blocked on.
+          if (!promptOpen || ev.agent_id !== undefined) return {};
+          promptOpen = false;
+          await safeStatus(agent, "working");
+          return {};
         case "Notification": {
           // Claude Code's Notification carries the human-readable reason the session is
           // blocked in `message`. When a tool permission is pending, lead with *what* it's
@@ -361,20 +377,25 @@ export function createClaudeHandle(deps: ClaudeHandleDeps = {}): ClaudeHooks {
           const activity = pendingTool
             ? `${pendingTool.name}${pendingTool.detail ? `: ${pendingTool.detail}` : ""}`
             : msg;
-          await safeStatus(agent, "waiting", activity);
+          promptOpen = turnOpen;
+          // Both writes are queued before either settles, so a batch relayed meanwhile queues its
+          // `working` behind the condition; queued between them, the condition would outlive the turn.
+          const writes = [safeStatus(agent, "waiting", activity)];
           const notificationType = typeof ev.notification_type === "string" ? ev.notification_type : undefined;
           if (notificationType === "permission_prompt" || notificationType === "agent_needs_input")
-            await safeCondition(agent, {
+            writes.push(safeCondition(agent, {
               code: notificationType === "permission_prompt" ? "approval" : "input",
               source: notificationType,
               ...(msg ? { message: msg } : {}),
               since: Date.now(),
-            });
+            }));
+          await Promise.all(writes);
           return {};
         }
         case "Stop":
         case "StopFailure": // turn died on an API error — Stop won't fire, so reset here too
           turnOpen = false;
+          promptOpen = false;
           pendingTool = undefined; // turn ended — don't let a stale tool attach to an idle-wait notification
           flushEvents(ev.transcript_path);
           // THE TURN TERMINAL, and it has to be a second call rather than part of the flush. The
@@ -405,6 +426,7 @@ export function createClaudeHandle(deps: ClaudeHandleDeps = {}): ClaudeHooks {
           return {};
         case "SessionEnd":
           turnOpen = false;
+          promptOpen = false;
           flushEvents(ev.transcript_path); // best-effort — the process may exit before it lands
           await safeStatus(agent, "offline");
           return {};
