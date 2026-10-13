@@ -1,5 +1,20 @@
 # @cotal-ai/runtime
 
+## 0.80.0
+
+### Patch Changes
+
+- 99c74fe: Complete an authorized relative sleep when its duration elapses before the first checkpoint mint. Preserve cancellation, existing-pause replay and checkpoint expiry rules.
+- Updated dependencies [5417401]
+- Updated dependencies [71e6311]
+- Updated dependencies [3614fdd]
+- Updated dependencies [e00402f]
+- Updated dependencies [80f66fd]
+- Updated dependencies [0835254]
+  - @cotal-ai/core@0.80.0
+  - @cotal-ai/workspace@0.80.0
+  - @cotal-ai/lang@0.80.0
+
 ## 0.79.0
 
 ### Patch Changes

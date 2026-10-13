@@ -1,5 +1,25 @@
 # @cotal-ai/auth
 
+## 0.80.0
+
+### Patch Changes
+
+- fe13981: Add an internal host-private environment-manager admission index with first-wins coordinate selection and broker-enforced write-once bindings. Require native message-deletion and purge protection, and refuse republishing of private metadata. This does not verify provider confirmation, expose an admission API or issue bootstrap credentials.
+- a64403e: Add an internal one-shot environment bootstrap issuer that binds its fixed-profile JWT to the native credential ledger and both lifecycle and registration fences. Repeated or uncertain signing attempts remain held. This does not expose an admission API, deliver bootstrap files or enable hosted execution.
+- 06bd47c: Refuse environment-manager gates on existing manager authority paths, and reserve the ordinary native gate before releasing direct-store preparation credentials. This does not implement environment admission or stock hosted execution.
+- e00402f: Add fixed environment-manager guest permission builders and a retained endpoint-gate family marker. These primitives do not yet implement host admission, stock manager bootstrap or hosted agent execution.
+- d4f711a: Preserve the initial native manager-gate revision so an aborted environment registration cannot be restored by a same-input reservation replay.
+- 6488bc7: Add internal environment-manager registration reservation groundwork with native lifecycle activation, immutable operation staging and family-bound gate freezing. This does not expose an admission API or issue bootstrap credentials.
+- Updated dependencies [5417401]
+- Updated dependencies [71e6311]
+- Updated dependencies [3614fdd]
+- Updated dependencies [e00402f]
+- Updated dependencies [80f66fd]
+- Updated dependencies [0835254]
+  - @cotal-ai/core@0.80.0
+  - @cotal-ai/workspace@0.80.0
+  - @cotal-ai/lang@0.80.0
+
 ## 0.79.0
 
 ### Patch Changes

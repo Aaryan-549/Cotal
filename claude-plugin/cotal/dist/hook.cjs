@@ -24153,6 +24153,8 @@ var AJV_PROFILE_OPTIONS = Object.freeze({
   // a caller starts reading `errors.length`, or a verdict diverges between the settings — this
   // pin must be re-measured before it stays.
   allErrors: true,
+  // JSON members are own properties. Host prototype names never satisfy required/properties.
+  ownProperties: true,
   validateFormats: false,
   loadSchema: void 0,
   // PINNED, never inherited from Ajv's default: the safe-pattern analyzer models `/u`
@@ -24621,18 +24623,6 @@ var MANAGER_ADMIN_SNAP = Object.freeze([...MANAGER_ADMIN_COMMANDS]);
 
 // ../../packages/core/dist/lifecycle-state.js
 var dec3 = new TextDecoder();
-
-// ../../packages/core/dist/lifecycle-saga.js
-var enc3 = new TextEncoder();
-var dec4 = new TextDecoder();
-
-// ../../packages/core/dist/endpoint-cluster.js
-var TRAIT_GUARDED = "ai.cotal.guarded";
-var TRAIT_PRICED = "ai.cotal.priced";
-var GOVERNED_TRAIT_URNS = Object.freeze([TRAIT_GUARDED, TRAIT_PRICED]);
-
-// ../../packages/core/dist/evict.js
-var import_transport_node3 = __toESM(require_transport_node(), 1);
 
 // ../../node_modules/.pnpm/@nats-io+jwt@0.0.10-5/node_modules/@nats-io/jwt/esm/jwt.js
 var Types;
@@ -26244,6 +26234,25 @@ var Algorithms;
 // ../../packages/core/dist/identity.js
 var import_nkeys = __toESM(require_mod2(), 1);
 
+// ../../packages/core/dist/remote-manager-authority.js
+var REMOTE_MANAGER_AUTHORITY_OPERATIONS = Object.freeze(["prepare", "activate", "renew", "session", "retire", "renewStandingBundle", "renewRunDriver", "transferReader"]);
+var MANAGED_AGENT_RUNTIME_STATES = Object.freeze(["reserved", "creating", "bound", "create-unknown", "closing", "closed"]);
+var MANAGED_AGENT_RUNTIME_READINESS = Object.freeze(["ready", "bound-not-ready", "none"]);
+var MANAGED_AGENT_RETIREMENT_PHASES = Object.freeze(["intent", "released", "retired", "deprovisioned", "terminal"]);
+var REMOTE_MANAGER_IDENTITY_NAMES = Object.freeze(["supervisor", "executor", "serve", "goalWriter", "sessionLedger"]);
+
+// ../../packages/core/dist/lifecycle-saga.js
+var enc3 = new TextEncoder();
+var dec4 = new TextDecoder();
+
+// ../../packages/core/dist/endpoint-cluster.js
+var TRAIT_GUARDED = "ai.cotal.guarded";
+var TRAIT_PRICED = "ai.cotal.priced";
+var GOVERNED_TRAIT_URNS = Object.freeze([TRAIT_GUARDED, TRAIT_PRICED]);
+
+// ../../packages/core/dist/evict.js
+var import_transport_node3 = __toESM(require_transport_node(), 1);
+
 // ../../packages/core/dist/endpoint-service.js
 var SOURCE_CHAIN_ID = "[A-Za-z0-9_-]{1,64}";
 var SOURCE_CHAIN_ELEMENT = new RegExp(`^(root|handle\\.${SOURCE_CHAIN_ID}\\.${SOURCE_CHAIN_ID}|session\\.${SOURCE_CHAIN_ID})$`);
@@ -26502,6 +26511,10 @@ var CREDENTIAL_LIFETIMES = {
   "transfer-reader": { class: "one-shot", defaultTtlSeconds: FIVE_MINUTES, note: "one transcript-receive or sweep over the minting instance's own transfer bucket" },
   "endpoint-evictor": { class: "one-shot", defaultTtlSeconds: 60, note: "one re-registration's verify-evict window: a scoped delivery-admin caller that kicks+verifies the SUPERSEDED serve family before the epoch advances; 60s bounds a copied cred to a minute" },
   "remote-manager": { class: "standing-renewable", defaultTtlSeconds: STANDING_RENEWABLE_TTL_SEC, renewalOwner: "auth-service", note: "the scoped remote manager lifecycle: own lease/presence plus same-owner agent provisioning; issued only by the typed supervise protocol, never by cotal mint or a raw view/profile string" },
+  "environment-bootstrap": { class: "one-shot", defaultTtlSeconds: FIVE_MINUTES, note: "one admitted environment's bootstrap caller; explicit expiry capped by admission and five minutes" },
+  "environment-manager-supervisor": { class: "standing-renewable", renewalOwner: "environment-authority", note: "own lease/presence/liveness; explicit expiry capped by admission, no auth-store access" },
+  "environment-manager-executor": { class: "standing-renewable", renewalOwner: "environment-authority", note: "own admitted authority instance RPC; explicit expiry capped by admission, no direct store access" },
+  "environment-manager-goal-writer": { class: "standing-renewable", renewalOwner: "environment-authority", note: "manager goal rows without the auth-read belt; explicit expiry capped by admission" },
   "membership-observer": { class: "rotation-renewed", defaultTtlSeconds: ROTATION_RENEWED_TTL_SEC, renewalOwner: "system-account rotation", note: "$SYS-account CONNZ observer; NOT online-renewable ($SYS seed dies at `up`) - bounded exp, renewed only by rotateSystemAccount + broker restart; doctor warns near expiry" },
   "connection-evictor": { class: "rotation-renewed", defaultTtlSeconds: ROTATION_RENEWED_TTL_SEC, renewalOwner: "system-account rotation", note: "$SYS-account KICK-only live-eviction cred; same rotation-renewed posture as the observer" }
 };
@@ -26618,13 +26631,6 @@ var Registry = class {
   }
 };
 var registry2 = new Registry();
-
-// ../../packages/core/dist/remote-manager-authority.js
-var REMOTE_MANAGER_AUTHORITY_OPERATIONS = Object.freeze(["prepare", "activate", "renew", "session", "retire", "renewStandingBundle", "renewRunDriver", "transferReader"]);
-var MANAGED_AGENT_RUNTIME_STATES = Object.freeze(["reserved", "creating", "bound", "create-unknown", "closing", "closed"]);
-var MANAGED_AGENT_RUNTIME_READINESS = Object.freeze(["ready", "bound-not-ready", "none"]);
-var MANAGED_AGENT_RETIREMENT_PHASES = Object.freeze(["intent", "released", "retired", "deprovisioned", "terminal"]);
-var REMOTE_MANAGER_IDENTITY_NAMES = Object.freeze(["supervisor", "executor", "serve", "goalWriter", "sessionLedger"]);
 
 // ../../packages/core/dist/agui-kind.js
 var AGUI_EVENT_TYPE = Object.freeze({

@@ -1,5 +1,11 @@
 # @cotal-ai/seat
 
+## 0.80.0
+
+### Minor Changes
+
+- 5417401: Authorized managed Claude launches now accept the selected workspace through the native trust dialog. Startup choices are matched against the current screen and answered once before the existing development-channel confirmation. Foreground trust prompts are unchanged. No tool-permission bypass flag is added; accepting trust enables the checkout's own hooks and settings. Upgrade the connector, core and runtime together; older runtimes do not implement the new startup choices.
+
 ## 0.79.0
 
 ## 0.78.1

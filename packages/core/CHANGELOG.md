@@ -1,5 +1,24 @@
 # @cotal-ai/core
 
+## 0.80.0
+
+### Minor Changes
+
+- 5417401: Authorized managed Claude launches now accept the selected workspace through the native trust dialog. Startup choices are matched against the current screen and answered once before the existing development-channel confirmation. Foreground trust prompts are unchanged. No tool-permission bypass flag is added; accepting trust enables the checkout's own hooks and settings. Upgrade the connector, core and runtime together; older runtimes do not implement the new startup choices.
+- e00402f: Add fixed environment-manager guest permission builders and a retained endpoint-gate family marker. These primitives do not yet implement host admission, stock manager bootstrap or hosted agent execution.
+- 80f66fd: Add owner-scoped environment provisioning with immutable profiles, persistent creation bindings and verified provider termination. Introduce a Tenki adapter with explicit resource bounds, restricted networking and native secret references. Hosts retain responsibility for workload authority, results and manager enrollment.
+
+### Patch Changes
+
+- 71e6311: The channel registry readers now validate each entry the way the write path does. The endpoint's
+  registry watch, `readChannelConfig`, `readChannelDefaults` and `readChannelRegistry` decode through
+  one `decodeChannelEntry`, which refuses a value that is not a JSON object or fails
+  `validateChannelConfig` or `validateChannelDefaults`. A raw put of an unknown delivery class or of
+  `null` on the defaults key is now dropped with a `warning`, and its channel resolves to the default
+  policy, instead of being cached as is. The validators also reject a `replay` that is not a boolean
+  and a `description` or `instructions` that is not a string.
+- 3614fdd: Validate JSON object members as own properties in the Node compiler. This repairs five of the twenty observed Node conformance cases and adds public-export regressions and named mutation checks. The remaining fifteen cases and browser validation are not resolved by this change.
+
 ## 0.79.0
 
 ### Patch Changes

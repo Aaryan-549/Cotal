@@ -1,5 +1,22 @@
 # @cotal-ai/cli
 
+## 0.80.0
+
+### Patch Changes
+
+- 5799f17: An empty `--subscribe`, `--allow-subscribe` or `--allow-publish` value on `cotal spawn`, and an empty `--allow-subscribe` or `--allow-publish` on `cotal mint`, is now an empty list. It used to read as an absent flag, so `cotal spawn <persona> --subscribe ""` launched with the persona's channels and `cotal mint <name> --allow-publish ""` granted the agent file's post list. Only an absent flag defers to the persona now.
+- 6946457: `cotal spawn -f` now records an agent whose launch settles uncertain in the run's ledger and lists it as pending. Such an agent neither joined the mesh nor exited within the readiness window, and the manager keeps managing it. It used to print as a failed launch with no ledger row, so `cotal down -f` never stopped it. An agent that exits on launch is still a failure with no ledger row.
+- 200d74c: Stop the spawned nats-server when `cotal up` cannot write `.cotal/nats.pid`, in both the foreground and the detached launch. `up` now exits with the write error and no broker left running, and leaves whatever is at the pid path in place.
+- cf25442: Preserve delivery credentials when a required whole-stack shutdown stop fails. Remove them only after all required stops succeed, without changing selective delivery teardown.
+- Updated dependencies [5417401]
+- Updated dependencies [71e6311]
+- Updated dependencies [3614fdd]
+- Updated dependencies [e00402f]
+- Updated dependencies [80f66fd]
+- Updated dependencies [0835254]
+  - @cotal-ai/core@0.80.0
+  - @cotal-ai/workspace@0.80.0
+
 ## 0.79.0
 
 ### Patch Changes
