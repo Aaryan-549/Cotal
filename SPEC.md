@@ -4644,9 +4644,9 @@ the same operation.
 **What stays.** Under the `platform-control` view itself the holder still enrolls, retires,
 validates and authorizes only same-owner descendants, and a `u_` principal's spawn request or admin
 authorization against a platform manager is refused as before. A spawn the holder starts without a
-consumed intent is not delegated and gains nothing from this subsection. A delegated agent is not
-preserved across a holder restart and is never restarted, because a restart would re-present a
-consumed intent.
+consumed intent is not delegated and gains nothing from this subsection. A delegated agent MUST NOT
+be restarted or launched again from a consumed intent. A host MAY support rebinding the same child
+after a holder restart through §13.18. This does not authorize another enrollment or handoff.
 
 ### 13.17 Managed lifecycle handoff
 
@@ -4723,11 +4723,126 @@ retirement door. There is no participant stop kind and no second retirement prot
 close or adopt may be keyed on the agent name alone. A runtime MAY host a handed-off child only where
 the host can perform the fenced close by lifecycle without the enrolling manager. A failed or
 uncertain step keeps the alias held. A manager preservation cut that holds a handed-off lifecycle is
-refused before any child stops, because a later manager never resumes it, and a manager stop after
-a refused cut retires that lifecycle through these steps.
+refused before any child stops because the local resume path cannot reconstruct it. Optional
+same-child recovery under §13.18 is separate from that cut. A manager stop after a refused cut
+retires that lifecycle through these steps.
 
 **Owner form.** A handoff serves whatever owner the enrollment returned. It neither requires nor
 excludes any owner form.
+
+### 13.18 Delegated child recovery
+
+This optional contract lets the same registered manager instance regain control of an existing
+child from a §13.16 user intent after its manager process is lost. It does not grant a new launch,
+move the child, or transfer authority to another instance or assignment. A host or runtime without
+this support MUST refuse recovery. It MUST NOT ignore recovery fields and execute an ordinary
+launch instead. Declaring the types or accepting a document is not runtime support.
+
+**Preparation.** A supporting host MAY accept `recoveryPlan` inside the launch `execute` object of
+`manager-delegated-user-intent-execution`. It contains `runtimeKind`, `launch`,
+`localStoreBindingDigest` and `localStoreIdentityDigest`. `launch` contains `agent`, `events` and
+`sourceDigest`, with optional `model` and `variant`. It carries no prompt, private file path,
+credential, owner assertion or provider identifier. The ordinary request and target keep their
+existing validation. The host MUST derive the owner, parent, registration and assignment from its
+current authority, not from the plan.
+
+The same consuming CAS that pins the original execution MUST retain an immutable descriptor:
+`{ v: 1, intentId, origin, target, runtimeKind, runtimeKey, launchIdentity, authorityDigest,
+localStoreBindingDigest, localStoreIdentityDigest }`. `target` is `{ owner, actor, lifecycleUid }`.
+`origin` binds `space`, `accountPublicKey`, `managerInstanceId`, `managerLifecycleUid`,
+`assignmentRevision`, `enrollmentRegistrationRevision`, `enrollmentRegistrationDigest`,
+`enrollmentServeEpoch`, `intentId` and `target`. The runtime key is the §13.17 lifecycle key.
+`launchIdentity` retains the launch fields and optional role, plus `spawner` and `authorityParent`.
+For this user-intent path, both principals MUST equal the original user's parent, not the platform
+holder. The descriptor cannot be installed after enrollment as an independent write. A consumed
+or enrolled record missing its descriptor or later preparation evidence MUST remain a visible
+hold. The §13.16 executor and sweeper rules still govern incomplete enrollment.
+
+**Custody and identity.** Before provider dispatch, the host MUST confirm the manager persisted its
+local token and sentinel in the assigned durable store. Proof fields are digests only:
+`storeBindingDigest`, `storeIdentityDigest`, `actorTokenDigest` and `sentinelDigest`. The original
+sentinel digest is pinned with the enrollment response. A changed store, absent material or
+incompatible authority MUST hold recovery; it cannot trigger initialization, reminting or copying
+another manager's credentials. Recovery changes none of §13.17's custody rules.
+
+The runtime MUST retain a protected observation of the child's original execution identity beside
+the authenticated create response. Rebinding requires a fresh observation of that same execution.
+A resource identifier, roster presence, copied nonce or resource listing alone is insufficient.
+A changed child or guest incarnation MUST be refused. A provider without verifiable same-child
+identity cannot enable recovery. No rebind may call create, enrollment or handoff again.
+
+**Transport.** Requests use the separate closed `manager-delegated-recovery` family on the host's
+holder route, not an inner `platform-control` request. The envelope contains `v: 1`, `kind`,
+`actor: "cli"`, `space`, `accountPublicKey`, `assignmentRevision`, `instanceId`,
+`managerLifecycleUid`, `currentRegistrationRevision`, `serveEpoch`, `registrationProof`,
+`requestId`, the five public `identities`, `operation` and `body`. The existing manager envelope
+validator applies, including the `sha256:` registration-proof prefix, nkey and lifecycle grammars.
+The operation body is closed:
+
+| Operation | Body |
+| --- | --- |
+| `confirm` | `intentId`, `target`, `expectedIntentRevision`, `localProof` |
+| `scan` | Empty, or `scanBinding` and `cursor` together |
+| `claim` | `intentId`, `target`, `expectedRecoveryRevision`, `expectedOrigin`, `attemptId`, `scanBinding` |
+| `settle` | `claimId`, `expectedRecoveryRevision`, `settleId`, and either `observation: "bound"` with `executionIdentityDigest`, or `observation: "held"` with `reasonCode` |
+| `finish` | `scanBinding`, `finishId`, `expectedScopeRevision` |
+| `watch` | `afterRevision` |
+
+Revisions, epochs and counts are nonnegative safe integers. Scan, claim, attempt, settlement and
+finish identifiers use the lifecycle-token grammar; `requestId` keeps the manager envelope's
+idempotency-token grammar. Content digests are 64 lowercase hexadecimal characters, distinct from
+the prefixed registration proof. Unknown fields,
+raw credentials and inconsistent target or scope bindings MUST be refused before effects.
+
+Every reply echoes the envelope's version, kind, space, account, assignment, instance, manager
+lifecycle, registration revision, epoch and request id, plus the operation and `ok`. A success
+contains only `result`; a refusal contains only `error { code, reasonCode? }`. Results are closed:
+`confirm` returns the intent, target, new revisions and `prepared: true`; `scan` returns its binding,
+records, nullable next cursor and completion flag; `claim` returns its claim id, attempt id, record
+and claim epoch; `settle` returns its claim id, settle id, revision and observation; `finish` returns
+its finish id, scan id, scope revision and `admission: "open"`; `watch` returns a revision and
+`scanInvalidated`. Callers MUST validate the echoed coordinates before using a result.
+
+A recovery record contains `intentId`, `intentRevision`, `recoveryRevision`, `target`, `phase`,
+`descriptor`, `descriptorDigest`, `authority`, `localProof`, `startedAt`, `executionIdentityDigest`
+and `reasonCode`. The last seven fields may be null while evidence is incomplete. Phases are
+`incomplete`, `prepared`, `create-unknown`, `eligible`, `bound`, `retiring` and `terminal`. Eligible
+or bound records require the descriptor, its digest, retained authority, local proof, original
+birth time and child execution identity. Descriptor and authority digests cover canonical JSON.
+An authority record keeps the existing retained-authority shape and original user parent. A birth
+time is a canonical ISO instant, not the successor's startup time. A page holds at most 1024 records;
+a retained authority list holds at most 64 entries.
+
+**Inventory and fencing.** A scan binding contains `scanId`, `accountPublicKey`,
+`managerInstanceId`, `managerLifecycleUid`, `assignmentRevision`, `currentRegistrationRevision`,
+`currentServeEpoch`, `sourceRevision`, `memberCount` and `membersDigest`. The digest covers the
+canonical ordered list of `[intentId, recoveryRevision, descriptorDigest]` triples, including null
+descriptor digests. A scan MUST close a durable same-instance launch-consumption fence and retain
+one immutable membership snapshot atomically with that fence. Every page reads that snapshot.
+The caller MUST verify the full count and digest and reject duplicate members. An incomplete scan
+cannot certify an empty inventory. Concurrent retirement and enrollment compensation MUST advance
+the scope revision and invalidate affected scans; retirement cannot be blocked by this fence.
+
+Claims and later writes MUST use durable, revision-checked CAS. Every effect MUST also recheck the
+current registration and assignment. Only the same origin instance, manager lifecycle and assignment
+may continue under its newly registered epoch. A sibling instance, reassignment, mismatched target
+or stale epoch MUST be refused. Claim and settlement retries are content-bound to their attempt
+and settlement ids. Losing a reply does not permit a new create or release an alias. A successor
+may replace a prior claim only after authoritative registration fencing and a successful new CAS.
+
+`finish` MUST verify current authority, complete membership and each current disposition before it
+opens launch consumption. No missing, held or newly retiring member may be skipped. Watch messages
+are revision hints, not authority or permission to act on a stale snapshot. Failure or loss of the
+watch requires a new authority check and scan.
+
+**Manager recovery.** The manager MUST reserve every held alias and reconstruct managed rows only
+from verified bound handles, original authority and locally derived secret references. It MUST NOT
+fabricate a local working directory, control endpoint, static credential or restart form. Recovery
+runs before goal terminal inference and run-driver takeover. While held, existing goals retain
+their identity and observed state, standing credential renewal continues, and new execution remains
+closed. Actual deadlines and revocations still apply. Failure to recover cannot retire a live
+child implicitly. User-intent retirement continues through §13.16; old-epoch terminal grants remain
+invalid, and a fresh terminal session still requires a supported terminal transport.
 
 ---
 

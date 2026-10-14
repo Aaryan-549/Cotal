@@ -711,6 +711,23 @@ close without the manager. The enrollment redeem
 (`COTAL_ENROLLMENT_FILE`) stays for lifecycles whose token the host generated itself; a host cannot
 mint one for a manager-enrolled lifecycle because it holds only the digest.
 
+### Delegated recovery contracts
+
+Core exports `RemoteDelegatedRecoveryRequest`, `RemoteDelegatedRecoveryResult`,
+`RemoteDelegatedRecoveryLaunchRequest`, their closed parsers, and
+`parseDelegatedRecoveryDescriptor`. `Runtime.rebindDelegated` describes an optional same-child
+rebind. These are contracts for SPEC §13.18, not an enabled recovery path. The current Manager
+does not call the new method or reconstruct delegated rows. Its public `adoptRuntimeHandle`
+returns a native handle without inserting a managed row.
+
+A supporting host retains the descriptor in the original user-intent consuming CAS, binds each
+claim to the original instance and current registration, and supplies complete fenced scans.
+The manager needs its original persistent secret store and a runtime that can verify the same
+child execution after process loss. It must retain held aliases before reconciling accepted goals.
+Missing storage or unverified child identity keeps recovery held; neither permits another launch.
+The request parsers validate data, not fresh host authority or durable transactions. Existing
+hosts continue to refuse the opt-in launch extension rather than silently ignore it.
+
 ## Provisioning a space (one-space reference shape)
 
 ```ts
