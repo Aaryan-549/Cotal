@@ -151,7 +151,23 @@ export interface Runtime {
    * key; one derived from the key or found by name or listing is never closed or adopted.
    */
   spawnDelegated?(launch: DelegatedSeatLaunch, handoff: ManagedLifecycleHandoff): AgentHandle;
+  /** Rebind only the retained child execution under a current host claim. This must not create,
+   * enroll, replay a handoff or use a resource name as identity evidence. Absence means unsupported. */
+  rebindDelegated?(request: DelegatedRebindRequest): Promise<DelegatedRebindResult>;
 }
+
+export interface DelegatedRebindRequest {
+  target: ManagedLifecycleTarget;
+  runtimeKey: string;
+  intentId: string;
+  claimId: string;
+  expectedExecutionIdentityDigest: string;
+}
+
+/** A bound handle retains the delegated lifecycle's no-local-custody contract. */
+export type DelegatedRebindResult =
+  | { state: "bound"; handle: AgentHandle & { reference?: never; release?: never }; executionIdentityDigest: string }
+  | { state: "held"; reason: import("./delegated-recovery.js").DelegatedRecoveryReason };
 
 /** What a non-local runtime needs to start one delegated seat, besides the handoff. Every field
  *  is a value; none is a path on the manager's filesystem. A spawn choice with no field here is
