@@ -148,11 +148,15 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
   const bootPending = (): boolean => bootReady && bootPrompt !== undefined;
 
   let sessionID: string | undefined;
-  let busy = false; // a turn is running → don't submit another (2.x coalesces natively submitted ones)
+  // What holds the session, so nothing else is submitted into it (2.x coalesces natively submitted
+  // turns): our prompt waiting for its execution to start, or a started execution. Only the end of a
+  // started execution settles `surfaced`; an end seen before it started belongs to an earlier one.
+  let execution: "submitted" | "running" | undefined;
   let primed = false; // persona goes out as `system` on the first connector-submitted turn, once
   let briefed = false; // channel briefing goes out once, same rule as 1.x
   let surfaced: string[] = []; // receive keys surfaced into the current turn, acked on completion
   let ended: OpenCode2Event["durable"]; // log position of the event that ended the last turn
+  let started: OpenCode2Event["durable"]; // log position of the running execution's start
   let submitting: Promise<void> | undefined; // the prompt POST in flight; what it carries settles when it answers
   const controller = new AbortController(); // aborted when teardown begins
 
@@ -216,14 +220,14 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
 
   /** Drive a turn carrying the current inbox batch into the owned session, via
    *  `POST /api/session/:id/prompt` (2.x has no `prompt_async` — measured 404). Never prompts into
-   *  a running turn (busy), matching 1.x's coalesce-avoidance. `override` is a bare nudge body (a
-   *  focus @mention pull); it surfaces nothing to ack. */
+   *  a running turn (`execution`), matching 1.x's coalesce-avoidance. `override` is a bare nudge body
+   *  (a focus @mention pull); it surfaces nothing to ack. */
   async function drive(override?: string): Promise<void> {
     // A turn driven once teardown has begun would outlive the seat, and its batch would never be acked.
-    if (busy || submitting || controller.signal.aborted) return;
+    if (execution || submitting || controller.signal.aborted) return;
     const id = await ensureSession();
     if (!id) return; // no visible session yet — the boot task above retries via sessionReady
-    if (busy || submitting || controller.signal.aborted) return; // rechecked after the await, same reason as plugin.ts's `drive`
+    if (execution || submitting || controller.signal.aborted) return; // rechecked after the await, same reason as plugin.ts's `drive`
     // The floor: while boot text exists and its gate is closed, nothing else goes out (the 1.x
     // boot floor in `drive` without the `pendingWake` slot, which 2.x does not have).
     const boot = bootPending() ? bootPrompt : undefined;
@@ -255,7 +259,7 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
     const text = parts.join("\n\n");
     const system = !primed && persona ? `${persona}\n\n${ORIENTATION_BOOTSTRAP}\n\n${MESH_FIRST_STEER}\n\n${WORKFLOW_STEER}` : undefined;
     if (!surface(ids)) return; // at the in-flight ceiling: the batch stays queued for a later turn
-    busy = true;
+    execution = "submitted";
     briefed = true;
     // The turn can end before this POST answers: the event stream is a separate transport. The boot
     // text, run turns and persona it carries settle only on the answer, so until then no second
@@ -271,7 +275,8 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
         if (system) primed = true;
         if (boot !== undefined) bootPrompt = undefined;
       } catch (e) {
-        busy = false;
+        // An execution that started meanwhile still holds the session: only our submission is released.
+        if (execution === "submitted") execution = undefined;
         abandonSurfaced();
         log(`drive failed: ${(e as Error).message}`);
       } finally {
@@ -281,31 +286,34 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
     await submitting;
   }
 
-  /** Whether an execution event is a replay: at or before the last turn's end in the same session's
-   *  durable log. 2.x gives every execution event that position, so one without it cannot be told
+  /** Whether an execution event is a replay: at or before `mark`, by default the last turn's end, in
+   *  the same session's durable log. 2.x gives every execution event that position, so one without it cannot be told
    *  from a replay and is refused. */
-  function replayed(ev: OpenCode2Event): boolean {
+  function replayed(ev: OpenCode2Event, mark = ended): boolean {
     const at = ev.durable;
     if (!at) log(`${ev.type} carries no durable log position; ignored`);
-    return !at || (at.aggregateID === ended?.aggregateID && at.seq <= ended.seq);
+    return !at || (at.aggregateID === mark?.aggregateID && at.seq <= mark.seq);
   }
 
-  /** A turn ended: clear `busy`, settle the batch it carried, then drive whatever waited behind it,
-   *  as 1.x's `completeTurn` does. The incoming handler and the boot task decline while a turn runs,
-   *  so nothing else would. The carried batch is left out of the wake count: after a failed turn it
-   *  is still in the inbox, and driving it again here would loop a turn that keeps failing. It goes
-   *  out with the next drive or when the broker redelivers it. A replayed end, or one with no turn
-   *  running, closes nothing: acting on it would resubmit a failed batch, or settle the batch driven
-   *  below before its turn ran. */
+  /** A turn ended: release `execution`, settle the batch it carried, then drive whatever waited
+   *  behind it, as 1.x's `completeTurn` does. The incoming handler and the boot task decline while a
+   *  turn runs, so nothing else would. The carried batch is left out of the wake count: after a failed
+   *  turn it is still in the inbox, and driving it again here would loop a turn that keeps failing. It
+   *  goes out with the next drive or when the broker redelivers it. A replayed end, or one with no
+   *  started execution, closes nothing: acting on it would resubmit a failed batch, or settle the
+   *  batch driven below before its turn ran. The latter's position is still recorded, so a replay of
+   *  it closes nothing either once an execution is running. An end at or before the running
+   *  execution's start belongs to an earlier one, so it is not recorded and closes nothing. */
   async function completeTurn(ev: OpenCode2Event, settle: () => void): Promise<void> {
-    if (replayed(ev) || !busy) return;
+    if (replayed(ev) || (execution === "running" && replayed(ev, started))) return;
     ended = ev.durable;
-    busy = false;
+    if (execution !== "running") return;
+    execution = undefined;
     const carried = new Set(surfaced);
     settle();
     await safeStatus("idle");
     // Not awaited: the event loop must keep consuming while the POST is unanswered, so a turn that
-    // starts meanwhile sets `busy` and `drive` declines instead of submitting into it.
+    // starts meanwhile sets `execution` and `drive` declines instead of submitting into it.
     void (async () => {
       await submitting;
       if (ended !== ev.durable) return; // a later turn ended during the wait: only its task leaves out the batch that turn failed
@@ -315,9 +323,9 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
 
   // Inbound mesh → drive (never interrupt a running turn). Mirrors plugin.ts's `agent.on`
   // wiring, trimmed to this adapter's simpler single-session, no-swap scope (M3c's event stream
-  // is what actually clears `busy`; these wakes only ask "is there anything to submit now").
+  // is what actually clears `execution`; these wakes only ask "is there anything to submit now").
   agent.on("incoming", (item: { kind: string; mentionsMe?: boolean; recvKey: string }) => {
-    if (busy) return;
+    if (execution) return;
     const automatic = agent.inboxScope(item.recvKey) === "automatic";
     const directed = item.kind !== "channel" || item.mentionsMe;
     if (automatic && (directed || agent.attention === "open")) void drive();
@@ -326,7 +334,7 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
     void drive("📨 You were mentioned — read it with cotal_inbox.");
   });
   agent.on("wake", () => {
-    if (!busy) void drive();
+    if (!execution) void drive();
   });
 
   // `e.prompt` is `DeepMutable` (measured) — mutate the text part directly, same composition as
@@ -380,9 +388,11 @@ export async function setupCotal(ctx: OpenCode2Context): Promise<(() => Promise<
             break;
           }
           case "session.execution.started": {
-            // A replayed start belongs to a turn whose end already came, so it would hold `busy` for good.
-            if ((sessionID && data.sessionID !== sessionID) || replayed(ev)) break;
-            busy = true;
+            // A replayed start belongs to a turn whose end already came, so it would hold the session for good.
+            // One at or before the last start is a late copy: taking it would let an earlier end pass as this execution's.
+            if ((sessionID && data.sessionID !== sessionID) || replayed(ev) || replayed(ev, started)) break;
+            execution = "running";
+            started = ev.durable;
             await safeStatus("working");
             break;
           }
