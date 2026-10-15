@@ -236,9 +236,11 @@ export function readProcessRecord(
  * without holding a kernel capability (#969 design shape (a)): the start time of a pid is fixed for
  * the life of that pid and changes the moment the number is reused.
  *
- * FORMAT: two whitespace-separated fields, `pid` and `token`. The token is opaque here (see
- * {@link ProcessStartTokenReader} for what produces it); a record carrying only a pid is a LEGACY
- * record (pre-identity build) and every consumer must treat it as such, loud.
+ * FORMAT: the `pid`, one space, then the `token` to the end of the line. The token is opaque here
+ * (see {@link ProcessStartTokenReader} for what produces it) and may itself hold spaces: macOS
+ * `ps -o lstart=` gives `Thu Oct 15 21:16:51 2026`, and pads a one-digit day with a second space.
+ * A record carrying only a pid is a LEGACY record (pre-identity build) and every consumer must
+ * treat it as such, loud.
  */
 export type ProcessIdentityRecord = { pid: number; token: string };
 
@@ -251,15 +253,16 @@ export type ReadRecord = { kind: "record"; record: ProcessIdentityRecord } | { k
 export function parseRecord(raw: string): ReadRecord {
   const trimmed = raw.trim();
   if (trimmed === "") return { kind: "husk" };
-  // FIELD SPLIT, not a substring: the token may itself contain digits (it is a timestamp), so
-  // anything other than exactly two fields cannot name both a pid and its start.
-  const fields = trimmed.split(/\s+/);
-  if (fields.length === 1) {
-    const pid = parsePid(fields[0]!);
+  // The first field is the pid and everything after the first space is the token, kept byte for byte:
+  // a macOS start token has spaces of its own, and the live token it is compared with keeps them too.
+  const gap = trimmed.search(/\s/);
+  if (gap === -1) {
+    const pid = parsePid(trimmed);
     return pid === undefined ? { kind: "unattributable", raw: trimmed } : { kind: "legacy", pid };
   }
-  if (fields.length === 2 && parsePid(fields[0]!) !== undefined && fields[1] !== "")
-    return { kind: "record", record: { pid: parsePid(fields[0]!)!, token: fields[1] } };
+  const pid = parsePid(trimmed.slice(0, gap));
+  const token = trimmed.slice(gap + 1);
+  if (pid !== undefined && token !== "" && token.trim() === token) return { kind: "record", record: { pid, token } };
   return { kind: "unattributable", raw: trimmed };
 }
 

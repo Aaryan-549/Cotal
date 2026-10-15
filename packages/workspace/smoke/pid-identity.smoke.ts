@@ -80,6 +80,23 @@ try {
   check("parseRecord reads an empty file as a husk", parseRecord("  \n").kind === "husk");
   check("parseRecord refuses garbled content as unattributable", parseRecord("x y z").kind === "unattributable");
   check("formatRecord is the inverse of parseRecord", parseRecord(formatRecord({ pid: 4321, token: "t" })).kind === "record");
+  // The macOS start token is `ps -o lstart=` output, which has spaces. Every pin written on a Mac
+  // read back as unattributable, so the manager failed its own pin at boot and `cotal down` refused
+  // every component (#3924). The live cell P3 is the repro on a Mac; P1 and P2 hold the format on
+  // any platform, since a Linux token has no spaces to lose.
+  {
+    const roundTrip = (token: string) => {
+      const read = parseRecord(formatRecord({ pid: 4321, token }));
+      return read.kind === "record" && read.record.pid === 4321 && read.record.token === token;
+    };
+    check("P1 a start token with spaces (macOS lstart) reads back as a record", roundTrip("Thu Oct 15 21:16:51 2026"));
+    check("P2 a padded one-digit day keeps its double space byte for byte", roundTrip("Thu Oct  5 09:01:02 2026"));
+    const own = join(root, "own.pid");
+    writeFileSync(own, String(process.pid));
+    writeIdentityPin(own, process.pid);
+    const verdict = verifyIdentityPin(own);
+    check("P3 this process's own pin verifies as a match on this platform", verdict.kind === "match", verdict);
+  }
 
   // ── A. THE MISMATCH REFUSAL on the delivery daemon's own stop path (#969 acceptance 1) ─────
   {
