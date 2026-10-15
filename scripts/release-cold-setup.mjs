@@ -77,7 +77,7 @@ try {
     const file = join(packs, pkg.archive); assert(sha(readFileSync(file)) === pkg.sha256, "candidate tarball hash mismatch"); archives.push(file);
   }
   check("candidate contains the complete declared CLI and workspace closure", names.has("cotal-ai") && names.has("@cotal-ai/workspace") && names.has("@cotal-ai/manager"));
-  run("install", [npmCli, "install", "--no-audit", "--no-fund", "--strict-peer-deps", ...archives], installed, 300_000);
+  run("install", [npmCli, "install", "--no-audit", "--no-fund", "--strict-peer-deps", "--foreground-scripts", "--loglevel=info", ...archives], installed, 300_000);
   for (const pkg of manifest.packages) {
     const dir = join(installed, "node_modules", pkg.name);
     const actual = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
@@ -93,6 +93,8 @@ try {
   check("installed CLI version", run("version", [cli, "--version"]).trim() === `cotal-ai ${version}`);
   run("help", [cli, "--help"]);
   check("fresh home has no existing Cotal state", !existsSync(env.COTAL_HOME));
+  const native = JSON.parse(run("native-process-identity", [inspect, installed, root, "self"]));
+  check("native process identity round-trips before daemon startup", native.nativeIdentity === true);
   run("seed", [cli, "ext", "seed"]);
   for (let round = 0; round < 2; round++) {
     // Explicit target plus an existing owned .cotal directory prevents cwd fallback to an operator mesh.

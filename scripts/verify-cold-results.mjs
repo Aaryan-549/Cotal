@@ -23,6 +23,7 @@ for (const [runner, platform, arch] of targets) {
         assert(result.checks.includes(`round ${round} ${name}`), "cold result omitted a required lifecycle assertion");
     }
     assert(result.checks.includes("cold restart replaces every process generation"), "cold result omitted restart identity comparison");
+    assert(result.checks.includes("native process identity round-trips before daemon startup"), "cold result omitted the first native identity read");
     for (const rows of result.generations) {
       for (const component of ["nats", "manager", "delivery"]) assert(rows.some((row) => row.name.startsWith(component + ".") && Number.isSafeInteger(row.pid) && row.token), "cold result omitted a native process identity");
     }

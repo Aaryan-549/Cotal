@@ -32,6 +32,17 @@ if (mode === "running") {
   const remaining = readdirSync(dir).filter((name) => name.endsWith(".pid") || name.endsWith(".pid.identity"));
   if (remaining.length) throw new Error(`cold setup: process records remain: ${remaining.join(", ")}`);
   console.log(JSON.stringify({ generationsStopped: rows.length, recordsRemaining: 0 }));
+} else if (mode === "self") {
+  const path = join(root, "cold-identity.pid");
+  assert(!existsSync(path) && !existsSync(workspace.identityPinPath(path)), "cold identity probe already exists");
+  try {
+    workspace.writePidPair(path, process.pid);
+    assert(workspace.verifyIdentityPin(path).kind === "match", "native cold process creation identity must round-trip");
+    console.log(JSON.stringify({ nativeIdentity: true }));
+  } finally {
+    rmSync(path, { force: true });
+    rmSync(workspace.identityPinPath(path), { force: true });
+  }
 } else if (mode === "policy") {
   const context = { root, space: snapshot };
   const pidPath = workspace.canonicalLocalProcessPath(workspace.MANAGER_PIDFILE, context);
