@@ -274,12 +274,15 @@ try {
     // This guards command construction only; the native Windows cold suite executes the OS read.
     const originalExec = childProcess.execFileSync;
     let nativeQuery = false;
-    let nativeTimeout: unknown;
+    const nativeTimeouts: unknown[] = [];
+    let mode = "success";
     childProcess.execFileSync = ((file: unknown, args: unknown, ...rest: unknown[]) => {
       if (file === "powershell.exe") {
         nativeQuery = Array.isArray(args) && args[3] === "[System.Diagnostics.Process]::GetProcessById(4242).StartTime.ToUniversalTime().ToFileTimeUtc()";
-        nativeTimeout = (rest[0] as { timeout?: unknown } | undefined)?.timeout;
-        return win32Token;
+        nativeTimeouts.push((rest[0] as { timeout?: unknown } | undefined)?.timeout);
+        if (mode === "denied" || mode === "timeout" || (mode === "timeout-once" && nativeTimeouts.length === 1))
+          throw Object.assign(new Error("synthetic native query failure"), { code: mode === "denied" ? "EACCES" : "ETIMEDOUT" });
+        return mode === "malformed" ? "not-a-filetime" : win32Token;
       }
       return Reflect.apply(originalExec, childProcess, [file, args, ...rest]);
     }) as typeof originalExec;
@@ -287,7 +290,23 @@ try {
     try {
       const token = win32ProcessCreationToken(4242);
       check("F7 win32 creation asks the native Process API without a cmdlet", token === win32Token && nativeQuery);
-      check("F8 win32 creation allows a bounded ten-second cold runtime start", nativeTimeout === 10_000);
+      check("F8 win32 creation allows a bounded ten-second cold runtime start", nativeTimeouts[0] === 10_000);
+      mode = "timeout-once";
+      nativeTimeouts.length = 0;
+      const retried = win32ProcessCreationToken(4242);
+      check("F9 win32 creation retries a timeout once with a five-second bound", retried === win32Token && nativeTimeouts.length === 2 && nativeTimeouts[0] === 10_000 && nativeTimeouts[1] === 5000);
+      mode = "denied";
+      nativeTimeouts.length = 0;
+      const denied = win32ProcessCreationToken(4242);
+      check("F10 win32 creation does not retry a non-timeout failure", denied === undefined && nativeTimeouts.length === 1);
+      mode = "timeout";
+      nativeTimeouts.length = 0;
+      const timedOut = win32ProcessCreationToken(4242);
+      check("F11 win32 creation refuses after the second timeout", timedOut === undefined && nativeTimeouts.length === 2);
+      mode = "malformed";
+      nativeTimeouts.length = 0;
+      const malformed = win32ProcessCreationToken(4242);
+      check("F12 win32 creation refuses malformed output without a retry", malformed === undefined && nativeTimeouts.length === 1);
     } finally {
       childProcess.execFileSync = originalExec;
       syncBuiltinESMExports();

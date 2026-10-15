@@ -129,22 +129,72 @@
     {
       "name": "M11 the Windows reader uses management cmdlet discovery again",
       "file": "packages/workspace/src/pid.ts",
-      "find": "        `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,",
-      "replace": "        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToFileTimeUtc()`,",
+      "find": "          `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,",
+      "replace": "          `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToFileTimeUtc()`,",
       "expectRed": "F7 win32 creation asks the native Process API without a cmdlet",
       "cell": "F7 win32 creation asks the native Process API without a cmdlet",
-      "command": "pnpm build > /dev/null && pnpm smoke:pid-identity",
-      "afterRestore": "pnpm build > /dev/null"
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     },
     {
       "name": "M12 the Windows reader cuts off a measured cold runtime start",
       "file": "packages/workspace/src/pid.ts",
-      "find": "      { encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"], timeout: 10_000 },",
-      "replace": "      { encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"], timeout: 5000 },",
+      "find": "  for (const timeout of [10_000, 5_000]) {",
+      "replace": "  for (const timeout of [5_000, 5_000]) {",
       "expectRed": "F8 win32 creation allows a bounded ten-second cold runtime start",
       "cell": "F8 win32 creation allows a bounded ten-second cold runtime start",
-      "command": "pnpm build > /dev/null && pnpm smoke:pid-identity",
-      "afterRestore": "pnpm build > /dev/null"
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M13 a timed-out Windows read is never retried",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  for (const timeout of [10_000, 5_000]) {",
+      "replace": "  for (const timeout of [10_000]) {",
+      "expectRed": "F9 win32 creation retries a timeout once with a five-second bound",
+      "cell": "F9 win32 creation retries a timeout once with a five-second bound",
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M14 the Windows reader retries non-timeout failures",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "      if ((error as NodeJS.ErrnoException).code !== \"ETIMEDOUT\") return undefined;\n",
+      "replace": "",
+      "expectRed": "F10 win32 creation does not retry a non-timeout failure",
+      "cell": "F10 win32 creation does not retry a non-timeout failure",
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M15 the Windows reader exceeds two attempts",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  for (const timeout of [10_000, 5_000]) {",
+      "replace": "  for (const timeout of [10_000, 5_000, 5_000]) {",
+      "expectRed": "F11 win32 creation refuses after the second timeout",
+      "cell": "F11 win32 creation refuses after the second timeout",
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M16 the Windows retry exceeds five seconds",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  for (const timeout of [10_000, 5_000]) {",
+      "replace": "  for (const timeout of [10_000, 10_000]) {",
+      "expectRed": "F9 win32 creation retries a timeout once with a five-second bound",
+      "cell": "F9 win32 creation retries a timeout once with a five-second bound",
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M17 the Windows reader retries malformed successful output",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "      return parseWin32CreationToken(out);",
+      "replace": "      const token = parseWin32CreationToken(out);\n      if (token !== undefined) return token;",
+      "expectRed": "F12 win32 creation refuses malformed output without a retry",
+      "cell": "F12 win32 creation refuses malformed output without a retry",
+      "command": "pnpm --filter @cotal-ai/workspace build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     }
   ]
 }

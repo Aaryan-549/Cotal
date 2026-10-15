@@ -422,8 +422,9 @@ that names a different start means the pid was reused, so teardown refuses and p
 or unreadable pin also refuses. macOS start tokens keep their spaces, including the padded day,
 in both the identity pin and the one-shot shutdown intent. A single record cannot span lines.
 On Windows, the reader uses .NET `Process.StartTime` through PowerShell and converts it to UTC
-FILETIME. It does not load management cmdlets during a cold launch. The read allows up to ten
-seconds for a fresh PowerShell runtime to start; it does not retry or accept an unreadable pin.
+FILETIME. It does not load management cmdlets during a cold launch. The first invocation allows ten
+seconds. A timeout triggers one immediate retry limited to five seconds. Other failures and a second
+timeout leave identity unverified; an unreadable pin still refuses teardown.
 
 The pidfile and its pin are published by renames, and the pidfile rename is the commit point. Just
 before it, the pin holds two lines: the old process's and the new one's. A launcher that dies
