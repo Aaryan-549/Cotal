@@ -638,6 +638,51 @@ Claude process's environment, so share only when you're fine with that teammate 
 the key), and memory adds up, because a heavy server boots once per spawn, multiplied
 across a team, and can starve a small machine.
 
+## Host sessions in one process
+
+A host serving many managed seats can run their MCP servers in one process with the subpath
+`@cotal-ai/connector-claude-code/mcp`, which loads with both `import` and `require`:
+
+```ts
+import { serveClaudeSession } from "@cotal-ai/connector-claude-code/mcp";
+
+const session = await serveClaudeSession({ env, input, output });
+await session.close();
+```
+
+Loading the module only exports it; it serves its own stdio only when run, as `node dist/mcp.cjs`.
+The subpath ships CommonJS declarations so TypeScript hosts can use either module format,
+including CommonJS consumers with Node16 or Node18 module settings.
+Claude Code pushes `claude/channel` only to a stdio server it launched, so each `claude` still
+launches a stdio command, such as a small relay that pipes its stdio to the host.
+
+- **Managed only.** `env` is a complete launch environment, copied when the call starts. It must
+  carry a mesh identity and the full control pair, or the call rejects before the session joins the
+  mesh. The presence environment label, bearer commands, carried-fork records and feedback contact
+  lookup use that copy. Feedback's Git fallback reads the session's global config, including its
+  includes, without reading the host repository config. Set `COTAL_FEEDBACK_EMAIL` or pass the
+  feedback tool's `email` argument to choose another contact. Include the `PATH`, `HOME` and other OS
+  variables subprocesses need; the host's environment is not merged into them. Subprocesses still
+  use the host process's working directory. A plain `claude` with no identity is served by `mcp.cjs` run directly. Sharing a process
+  does not isolate untrusted tenants or their files.
+- **Streams.** `input` carries JSON-RPC from the client and `output` carries this session's replies
+  and `claude/channel` pushes. The caller owns both streams. Input that has emitted `end` or is
+  destroyed rejects startup. Buffered unread input remains eligible. When an active session's
+  `input` emits `end` or `close`, the session closes, including after a relay connection resets.
+  Teardown may pause `input` and removes the transport's error handler. A host that reuses the
+  stream must resume it as needed and keep its own stream error handlers.
+- **`fatalBind`.** Off by default: a control socket that cannot be bound rejects the call and the
+  host keeps its other sessions. Only a process that is the session turns it on, as `mcp.cjs` does.
+- **Teardown.** `close()` closes the control socket, the wake policy, the AG-UI emitter, the mesh
+  endpoint and the MCP server, and is idempotent. It removes its input listeners without closing
+  the caller's streams. The returned promise rejects if teardown fails. A startup failure closes
+  what was started before the call rejects. A manager shutdown frame or input EOF or closure closes the
+  session and then calls `onShutdown(code)` once. A teardown failure is logged and reported with
+  code 1, without becoming an unhandled rejection in the host. Close waits for a pending broker
+  dial to settle. A dial that fails after shutdown starts is not a teardown failure. The session
+  releases local inbox custody only after its connections are proved closed, so the same lifecycle
+  can reopen after a successful close. An active duplicate or an unproved close retains custody.
+
 ## Feedback
 
 `cotal_feedback` works out of the box: without a key it posts to the public intake at
