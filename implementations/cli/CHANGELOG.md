@@ -1,5 +1,20 @@
 # @cotal-ai/cli
 
+## 0.82.0
+
+### Patch Changes
+
+- ddbe799: `cotal up --detach` and `cotal up -f` now exit 1 when the control plane does not come up on a first boot. Both printed `! control plane degraded: ...` and then exited 0, so a script or unit read success over a mesh with no manager or delivery daemon, while a refresh over the same failure already exited 1.
+- 49cb75f: `cotal up -f` and `cotal spawn -f` now check `--server` against the rules a manifest's `broker.servers` already follows. A `--server` URL with embedded credentials used to pass: `up -f --dry-run` printed it whole in the plan, and `spawn -f` dialed it and printed it in its reach error. It is now refused with `--server entry 1 must not embed credentials`, a message that does not repeat the value. An invalid `--server` URL is refused the same way, and so is a value that names no URL: `--server ""` used to fall back to the default broker, and a blank or comma-only `--server` or `broker.servers` failed with a bare `Invalid URL`. Both now get `names no server URL`.
+- 2df06bd: A bare re-run of `cotal up` now finds this folder's own mesh when its first boot ran on an auto-selected port. The re-run started from the default URL, missed the record, picked another free port, and was refused with `space "<space>" is already in use by a mesh at <url>`, so a refresh or repair needed `--server` by hand. With no `--server`, `cotal up` now starts from the URL this root recorded for the space, and `--host` keeps that URL's port.
+- 11690b1: `cotal update` no longer refuses its running-manager continuity check when the selected mesh is one this machine runs and it is stopped. A mesh selected with `--space` or by running inside its project, where no `cotal supervise` process on this machine may be serving that space and whose recorded broker address refuses the connection because nothing listens there, has no running manager to preserve, so the update now reconciles the connectors and extensions. This covers a local user-auth mesh too, which used to refuse on its stopped auth service first. Before this, `cotal down` followed by `cotal update`, the only way past a `legacy` manager verdict, refused with "no mesh running at ... run `cotal up` there to restart" and left every extension at the old version. Anything short of that proof still refuses: a mesh registered with `cotal meshes add`, a `--server` override, a `cotal supervise` process still running from any folder whose command line names that space or no space, or an address where anything accepts the connection or the dial does not finish in time.
+- Updated dependencies [4f52881]
+- Updated dependencies [6afa12f]
+- Updated dependencies [7c6c109]
+- Updated dependencies [9a93a58]
+  - @cotal-ai/core@0.82.0
+  - @cotal-ai/workspace@0.82.0
+
 ## 0.81.1
 
 ### Patch Changes

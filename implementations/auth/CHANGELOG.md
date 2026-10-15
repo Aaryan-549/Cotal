@@ -1,5 +1,20 @@
 # @cotal-ai/auth
 
+## 0.82.0
+
+### Patch Changes
+
+- 4f52881: Accept canonical space names in workflow admission records, including underscores, while preserving the separate endpoint-name grammar and rejecting malformed spaces.
+- fa8f7da: `cotal up --user-auth --idp <url>` on a space that already pins an IdP now compares the normalized URL with the pin. Re-running the command that created the pin with a trailing slash was refused as a re-pointed IdP that "would re-key every derived owner", although both spellings name the same IdP. A malformed later value now gets the same URL refusal as a first enable, and a different IdP is still refused.
+- 8fd9427: The manager-service authority request now refuses a redirect, as the other manager-authority requests already did. Before this, a 307 or 308 from the pinned endpoint re-sent the login proof to the address it named and returned that host's answer as the manager's authority material. All remote manager-authority requests now go through one endpoint lookup and one request path, so the redirect refusal and the refusal messages are the same for each of them.
+- Updated dependencies [4f52881]
+- Updated dependencies [6afa12f]
+- Updated dependencies [7c6c109]
+- Updated dependencies [9a93a58]
+  - @cotal-ai/core@0.82.0
+  - @cotal-ai/workspace@0.82.0
+  - @cotal-ai/lang@0.82.0
+
 ## 0.81.1
 
 ### Patch Changes

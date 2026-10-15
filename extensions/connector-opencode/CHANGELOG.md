@@ -1,5 +1,14 @@
 # @cotal-ai/connector-opencode
 
+## 0.82.0
+
+### Patch Changes
+
+- 45c0d12: On OpenCode 2.x, a peer batch is acked only by the end of an execution that started after the batch was submitted. An end observed while idle, a replay of one, or an end positioned before the running execution started (even after a late copy of an earlier start) no longer acks a newly submitted batch, and a failed prompt submission no longer lets a second batch into an execution that is still running.
+- c428383: The OpenCode launcher now stops its server on SIGINT or SIGTERM from the moment it starts it. The handler used to be installed only after the plugin's session handshake, so a graceful stop during the boot, which can take a minute on a cold server, ended the launcher and left the server running on the agent's database, with a `serve.pid` record that refused every later launch of that name until the server was killed by hand. One handler now stops the server and, once it runs, the TUI.
+- 3ed1942: The OpenCode launcher now records each server in a file of its own, `serve.<token>.pid` in the agent's directory, and removes only that file when the server exits. Every launch of a name used to share one `serve.pid`, and the launcher's exit handler removed it unconditionally, so a handler that ran after the next launch had started its server removed that server's record, and the launch after that started a second server on the same database. A launch now checks every record in the directory, including a `serve.pid` left by an earlier version, refuses while any names a running server, and removes the records of servers that are gone.
+- a33cd0b: The OpenCode 2.x adapter no longer starts a turn once its teardown has begun. A message handled after the disposer started, or a drive waiting on session creation when it started, used to be submitted to OpenCode as a new turn whose batch was never acked because the seat was going away. `drive` now refuses on entry and again after the session await, as the 1.x adapter does.
+
 ## 0.81.1
 
 ## 0.81.0

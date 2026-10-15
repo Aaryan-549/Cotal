@@ -26632,6 +26632,19 @@ var Registry = class {
 };
 var registry2 = new Registry();
 
+// ../../packages/core/dist/delegated-recovery.js
+var DELEGATED_RECOVERY_REASONS = Object.freeze([
+  "provider-unknown",
+  "store-unavailable",
+  "authority-unavailable",
+  "identity-unverified",
+  "descriptor-incomplete",
+  "retiring",
+  "authority-drift",
+  "identity-changed",
+  "scope-changed"
+]);
+
 // ../../packages/core/dist/agui-kind.js
 var AGUI_EVENT_TYPE = Object.freeze({
   RUN_STARTED: "RUN_STARTED",
