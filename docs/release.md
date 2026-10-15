@@ -129,6 +129,17 @@ wording in each file, because `scripts/release-notes-detail.mjs` dedupes summari
 
 ## Publication workflow
 
+Normal and snapshot publication both depend on the native cold-setup workflow. It packs every
+public package in the fixed group and installs the candidate into an empty home, config and cache
+on Linux, macOS and Windows, on x64 and arm64 with Node 22, 24 and 26. Each setup verifies the
+installed package bytes, seeds connectors and exercises two broker, delivery and Manager
+lifecycles. The checks cover native process pins, Manager control, one-shot shutdown policy,
+shutdown cleanup and fresh process generations after restart. Missing or failed results block
+publication. Logs and source-bound receipts are retained for each platform.
+
+A snapshot is versioned before these tests. Publication reuses those tested versions rather than
+generating a new timestamp after qualification.
+
 `ci:publish` in the root `package.json` is:
 
 - an exact-version census of every package in the Changesets fixed group against the registry;

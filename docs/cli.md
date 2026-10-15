@@ -42,6 +42,12 @@ Pointing `XDG_CONFIG_HOME` at a scratch dir is not enough by itself. Isolated re
 that must seed from a checkout also set `COTAL_ALLOW_CHECKOUT_SEED=1`, as described under
 [Built-in connectors are seeded extensions](#built-in-connectors-are-seeded-extensions).
 
+Before publication, the release workflow installs the packaged candidate into fresh homes and
+caches on Linux, macOS and Windows, on x64 and arm64 with Node 22, 24 and 26. Each setup seeds
+connectors, starts the broker, delivery daemon and Manager, checks native process identity and
+Manager control, then stops and restarts them. Every platform must pass before normal or snapshot
+publication can proceed.
+
 An undeclared flag is a usage error, and so is a flag given more than once unless it is
 repeatable, as `--opt` and `down --session-store` are. The command prints the error and its help,
 exits 1, and does not run.

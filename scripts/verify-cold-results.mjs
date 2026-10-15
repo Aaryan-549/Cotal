@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+const [directory, source] = process.argv.slice(2);
+assert(directory && /^[a-f0-9]{40}$/.test(source ?? ""), "cold result verifier needs an artifact directory and exact source");
+const root = resolve(directory);
+const targets = [
+  ["ubuntu-latest", "linux", "x64"], ["ubuntu-24.04-arm", "linux", "arm64"],
+  ["macos-15-intel", "darwin", "x64"], ["macos-15", "darwin", "arm64"],
+  ["windows-latest", "win32", "x64"], ["windows-11-arm", "win32", "arm64"],
+];
+let verified = 0;
+for (const [runner, platform, arch] of targets) {
+  for (const node of [22, 24, 26]) {
+    const result = JSON.parse(readFileSync(join(root, `cold-result-${runner}-node${node}`, "cold-result.json"), "utf8"));
+    assert(result.complete === true && result.source === source, "cold result incomplete or belongs to another source");
+    assert(result.platform === platform && result.arch === arch && result.node.startsWith(`v${node}.`), "cold result ran on the wrong operating system, architecture or Node");
+    assert(result.assertions === result.checks.length && new Set(result.checks).size === result.assertions && result.generations.length === 2, "cold result omitted lifecycle evidence");
+    for (const round of [0, 1]) {
+      for (const name of ["Manager, delivery and broker survive startup", "native Manager control answers", "empty Manager roster is an empty JSONL stream", "native shutdown policy is accepted once", "owned broker listener closed"])
+        assert(result.checks.includes(`round ${round} ${name}`), "cold result omitted a required lifecycle assertion");
+    }
+    assert(result.checks.includes("cold restart replaces every process generation"), "cold result omitted restart identity comparison");
+    for (const rows of result.generations) {
+      for (const component of ["nats", "manager", "delivery"]) assert(rows.some((row) => row.name.startsWith(component + ".") && Number.isSafeInteger(row.pid) && row.token), "cold result omitted a native process identity");
+    }
+    verified++;
+  }
+}
+console.log(`Verified ${verified} native cold setups at ${source}`);

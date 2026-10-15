@@ -46,6 +46,8 @@
     "check:shard-stability": "tsx bin/smoke/shard-stability.ts",
     "pr-head-gate": "node scripts/pr-head-gate.mjs",
     "test": "pnpm -r --if-present test",
+    "test:release-cold": "node scripts/release-cold-setup.mjs",
+    "smoke:release-cold-contract": "node scripts/release-cold.smoke.mjs",
     "smoke:schema-remaining15-diagnostic": "pnpm --dir packages/core exec node --test --test-concurrency=1 smoke/schema-remaining15-diagnostic.test.mjs",
     "smoke:schema-remaining15-schemasafe-comparison": "node --test --test-concurrency=1 packages/core/smoke/schema-remaining15-schemasafe-comparison.test.mjs",
     "smoke:schema-schemasafe-public-errors": "node --test --test-concurrency=1 packages/core/smoke/schema-schemasafe-public-errors.test.mjs",

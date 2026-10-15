@@ -1,0 +1,127 @@
+name: Cold setup
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      snapshot:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: cold native (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6.0.8
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cotal-ai/seat build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cold-native-${{ matrix.arch }}
+          path: packages/seat/build/Release/linux-${{ matrix.arch }}/peercred.node
+          if-no-files-found: error
+
+  candidate:
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6.0.8
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm smoke:release-cold-contract
+      - name: Prepare the snapshot once before qualification
+        if: inputs.snapshot != ''
+        env:
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: pnpm changeset version --snapshot "$SNAPSHOT"
+      - run: pnpm build
+      - uses: actions/download-artifact@v4
+        with:
+          name: cold-native-x64
+          path: ${{ runner.temp }}/cold-native-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cold-native-arm64
+          path: ${{ runner.temp }}/cold-native-arm64
+      - run: node scripts/seat-assemble-natives.mjs
+        env:
+          SEAT_NATIVE_X64: ${{ runner.temp }}/cold-native-x64/peercred.node
+          SEAT_NATIVE_ARM64: ${{ runner.temp }}/cold-native-arm64/peercred.node
+      - name: Pack every public candidate package
+        run: node scripts/pack-cold-candidate.mjs cold-candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cold-candidate
+          path: cold-candidate
+          if-no-files-found: error
+
+  lifecycle:
+    name: cold ${{ matrix.runner }} / Node ${{ matrix.node }}
+    needs: candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest, windows-11-arm]
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: cold-candidate
+          path: cold-candidate
+      - name: Install packaged candidate and exercise two native lifecycles
+        run: npm run test:release-cold -- cold-candidate cold-result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cold-result-${{ matrix.runner }}-node${{ matrix.node }}
+          path: |
+            cold-result.json
+            cold-result.json.logs
+          if-no-files-found: error
+
+  cold-ok:
+    if: always()
+    needs: [native, candidate, lifecycle]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cold-result-*
+          path: cold-results
+      - name: Verify every receipt belongs to this source and platform
+        run: node scripts/verify-cold-results.mjs cold-results "$GITHUB_SHA"
+      - name: Require every cold setup
+        env:
+          NATIVE: ${{ needs.native.result }}
+          CANDIDATE: ${{ needs.candidate.result }}
+          LIFECYCLE: ${{ needs.lifecycle.result }}
+        run: test "$NATIVE" = success && test "$CANDIDATE" = success && test "$LIFECYCLE" = success
