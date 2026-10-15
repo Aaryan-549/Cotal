@@ -25,6 +25,8 @@ export interface LocalProcess extends Extension {
   /** Path relative to `<root>/.cotal`; `{space}` expands to the injective hex space key
    *  (`spaceKey` — case-safe, so two case-differing spaces can never share a pid/log file). */
   readonly pidFile: string;
+  /** Windows stops use the process-bound local control capability instead of forceful SIGTERM. */
+  readonly cooperativeStop?: boolean;
   /** Files removed only after the process is confirmed gone. Same template rules as `pidFile`. */
   readonly artifacts?: readonly string[];
   /** Refuse selective shutdown while any unselected registered process is still live. */

@@ -5,7 +5,7 @@ import { closeSync, existsSync, linkSync, openSync, readFileSync, rmSync, writeF
 import { randomBytes } from "node:crypto";
 import {
   identityLegacyWarning, identityRefusal, identityUncertaintyRefusal, localProcessPath, parsePid, probeLiveness,
-  readPidfile, readProcessCommand, removePidPair, stopReservationPath, verifyIdentityPin,
+  readPidfile, readProcessCommand, removePidPair, requestLocalStop, stopReservationPath, verifyIdentityPin,
   type LocalProcess, type LocalProcessContext,
 } from "@cotal-ai/workspace";
 import { c } from "../ui.js";
@@ -18,7 +18,7 @@ export function processRecorded(component: LocalProcess, context: LocalProcessCo
 
 export interface StopLocalProcessOptions {
   /** Runs while this caller holds the `.stopping` reservation, after exact target verification and
-   * immediately before SIGTERM. Throwing aborts without signalling and preserves the pid record. */
+   * immediately before the stop request. Throwing aborts without signalling and preserves the pid record. */
   beforeSignal?: (attempt: {
     target: { pid: number; token: string } | { pid: number; token?: undefined };
     stopper: { pid: number; marker: string };
@@ -108,6 +108,8 @@ export async function stopLocalProcess(
 
   let stopped = false;
   let authorized = false;
+  const cooperative = process.platform === "win32" && component.cooperativeStop === true;
+  let cleanupRequest: ((gone: boolean) => void) | undefined;
   try {
     if (pid === undefined) {
       // An EMPTY pidfile is a pre-protocol husk (no process behind it) and is safe to clear. Any
@@ -149,8 +151,10 @@ export async function stopLocalProcess(
         return true;
       }
     }
-    if (identity.kind === "legacy") console.error(identityLegacyWarning(component.label, pidPath));
-    else if (identity.kind !== "match" && identity.kind !== "gone") throw identityUncertaintyRefusal(component.label, pidPath, identity);
+    if (identity.kind === "legacy") {
+      if (cooperative) throw new Error(`${component.label} has no creation identity for cooperative shutdown; stop it with its original supervisor`);
+      console.error(identityLegacyWarning(component.label, pidPath));
+    } else if (identity.kind !== "match" && identity.kind !== "gone") throw identityUncertaintyRefusal(component.label, pidPath, identity);
     // The beforeSignal hook authorizes an action against a LIVE exact process. A pinned record whose
     // process is already ESRCH-gone needs no spare capability or destructive intent because no signal
     // will be sent. Clear that stale record directly, preserving the hook's documented placement
@@ -161,27 +165,31 @@ export async function stopLocalProcess(
       return true;
     }
     authorized = true;
-    options.beforeSignal?.({
+    const attempt = {
       target: identity.kind === "match" ? identity.record : { pid },
       stopper: { pid: process.pid, marker },
-    });
+    };
+    options.beforeSignal?.(attempt);
     try {
-      process.kill(pid, "SIGTERM");
+      if (cooperative) cleanupRequest = requestLocalStop(pidPath, attempt);
+      else process.kill(pid, "SIGTERM");
     } catch (e) {
       // ONLY an ESRCH proves the process is already gone (safe to clear). EPERM (exists, another
       // user's) or any other errno (EIO, argument errors, unknown) means we could NOT confirm death
       // - reporting it stopped and removing its record would orphan a live process. Fail loud, keep
       // the record. A two-state "not alive => gone" is exactly the bug: `unknown` is not `dead`.
-      if ((e as NodeJS.ErrnoException).code === "ESRCH") {
+      if ((e as NodeJS.ErrnoException).code === "ESRCH" || (cooperative && probeLiveness(pid) === "dead")) {
         console.log(c.dim(`${component.label} (pid ${pid}) was not running.`));
         stopped = true;
         return true;
       }
-      throw new Error(`could not signal ${component.label} (pid ${pid}) (${(e as NodeJS.ErrnoException).code ?? "unknown error"}) - refusing to report it stopped or remove its record; stop it manually`);
+      throw new Error(`could not ${cooperative ? "request cooperative shutdown for" : "signal"} ${component.label} (pid ${pid}) (${(e as NodeJS.ErrnoException).code ?? (cooperative ? (e as Error).message : "unknown error")}) - refusing to report it stopped or remove its record; stop it manually`);
     }
     // Wait for CONFIRMED death (ESRCH), escalating to SIGKILL; `unknown`/`alive` both keep us
     // waiting, and if death is never confirmed the record is preserved (never deleted on a guess).
-    const graceDeadline = Date.now() + 15_000;
+    // Cooperative authentication can spend fifteen seconds reading the stopper's native identity;
+    // allow that bound and the daemon's cleanup before escalation, without waiting for a lease TTL.
+    const graceDeadline = Date.now() + (cooperative ? 20_000 : 15_000);
     while (probeLiveness(pid) !== "dead" && Date.now() < graceDeadline) await sleep(100);
     if (probeLiveness(pid) !== "dead") {
       try { process.kill(pid, "SIGKILL"); } catch { /* raced to exit */ }
@@ -205,9 +213,9 @@ export async function stopLocalProcess(
       if (stopped) removePidPair(pidPath, rawPid);
       else if (authorized) options.afterFailedSignal?.();
     } finally {
-      // A cleanup that throws still ends this stop: a reservation left behind refuses every other
-      // stop of this component for as long as this process lives.
-      rmSync(marker, { force: true });
+      // Both cleanups stay under this attempt's reservation, even when either one throws.
+      try { cleanupRequest?.(stopped); }
+      finally { rmSync(marker, { force: true }); }
     }
   }
 }

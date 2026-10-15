@@ -27,7 +27,7 @@ import {
   type TimerWriterHandle,
 } from "@cotal-ai/core";
 import { PermissionViolationError } from "@nats-io/transport-node";
-import { DELIVERY_CREDS_KIND, DELIVERY_PIDFILE, FsSecretStore, authDir, canonicalLocalProcessPath, canonicalRoot, deliveryCredsKey, findCotalRoot, isStoreIdFile, isWorkspaceTargetError, loadSpaceAuth, reclaimDeadPreUpgradeRecord, removePidPair, requireCotalRoot, resolveMeshTarget, segmentedKey, soleSpaceOf, spaceSegment, workspaceSecretStore, writePidPair, type MeshTarget } from "@cotal-ai/workspace";
+import { DELIVERY_CREDS_KIND, DELIVERY_PIDFILE, FsSecretStore, authDir, canonicalLocalProcessPath, canonicalRoot, deliveryCredsKey, findCotalRoot, isStoreIdFile, isWorkspaceTargetError, listenForLocalStop, loadSpaceAuth, reclaimDeadPreUpgradeRecord, removePidPair, requireCotalRoot, resolveMeshTarget, segmentedKey, soleSpaceOf, spaceSegment, workspaceSecretStore, writePidPair, type MeshTarget } from "@cotal-ai/workspace";
 import { startMembership } from "./membership.js";
 import { mayServeOn, leaseAction, type LeaseReading } from "./watchdog.js";
 import { DeliveryTransportHealth } from "./transport-health.js";
@@ -748,8 +748,7 @@ async function runStartedDelivery(
   // this process even if the bind below hangs or fails. Readiness is a separate fact and the lease's
   // own `ready` flag already carries it; the pidfile only ever claimed a process.
   //
-  // Placed one statement after the signal handlers, so every exit path from here on can remove it.
-  if (hosted === undefined) unrecordPid = recordDeliveryPid(root, space);
+  // Published below, after registering the cleanup for a failed local control setup.
   // AND THE SAME RELEASE, REACHABLE BY AN ORDINARY `catch`. The two process-level guards below
   // only see a fault that reaches the RUNTIME. A start-up rejection on the public CLI path does
   // not: `runCli` awaits this function inside its own try/catch (cli/src/command.ts), so the
@@ -815,6 +814,16 @@ async function runStartedDelivery(
     return closePromise;
   };
   publishReleaser(close);
+  if (hosted === undefined) {
+    if (process.platform === "win32") {
+      listenForLocalStop(canonicalLocalProcessPath(DELIVERY_PIDFILE, { root, space }), () => {
+        console.error(`• delivery: received local stop request, exiting (space ${space}, shard ${shard})`);
+        // Assigned to earlyStop above; the later swap selects the full shutdown once ready.
+        stopHandler!(0);
+      });
+    }
+    unrecordPid = recordDeliveryPid(root, space);
+  }
   stopHosted = (cause) => {
     unavailable = `delivery context stopped (code 1): ${cause}`;
     // A later close() returns this same promise, so its failure still reaches the host.

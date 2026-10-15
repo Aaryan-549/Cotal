@@ -329,6 +329,7 @@ export const MANAGER_PROCESS = {
   label: "manager",
   order: 10,
   pidFile: MANAGER_PIDFILE,
+  cooperativeStop: true,
   artifacts: [MANAGER_DELIVERY_AWARE_MARKER, MANAGER_SHUTDOWN_INTENT, MANAGER_SPARE_CAPABILITY],
 } satisfies LocalProcess;
 

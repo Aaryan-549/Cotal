@@ -187,6 +187,8 @@ export function cacheLocalProcess(component: LocalProcess): LocalProcess {
   }
   if (component.rootedAt !== undefined && component.rootedAt !== "target")
     throw new Error(`local-process ${component.name} declares an unknown rootedAt ${JSON.stringify(component.rootedAt)} - only "target" is defined`);
+  if (component.cooperativeStop !== undefined && typeof component.cooperativeStop !== "boolean")
+    throw new Error(`local-process ${component.name} cooperativeStop must be a boolean`);
   if (component.isOwnCommand !== undefined)
     throw new Error(`local-process ${component.name} declares isOwnCommand, which an installed extension's cached descriptor cannot carry`);
   return {
@@ -195,6 +197,7 @@ export function cacheLocalProcess(component: LocalProcess): LocalProcess {
     label: component.label,
     order: component.order,
     pidFile: component.pidFile,
+    cooperativeStop: component.cooperativeStop,
     artifacts: component.artifacts,
     stopLast: component.stopLast,
     clearsMesh: component.clearsMesh,

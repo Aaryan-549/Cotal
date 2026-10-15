@@ -180,6 +180,51 @@
       "expectRed": "F12 win32 creation refuses malformed output without a retry",
       "cell": "F12 win32 creation refuses malformed output without a retry",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M18 local stop accepts a request without the private nonce",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "!timingSafeEqual(Buffer.from(row.token, \"hex\"), Buffer.from(secret, \"hex\")) || ",
+      "replace": "",
+      "expectRed": "H1 a local stop without its private nonce cannot invoke cleanup",
+      "cell": "H1 a local stop without its private nonce cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M19 local stop ignores its target generation",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "row.target !== formatRecord(target) || typeof row.token",
+      "replace": "typeof row.token",
+      "expectRed": "H2 a local stop for another process generation cannot invoke cleanup",
+      "cell": "H2 a local stop for another process generation cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M20 local stop ignores the reservation inode",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "reservation(marker) !== row.reservation || ",
+      "replace": "",
+      "expectRed": "H3 a local stop with a replaced reservation cannot invoke cleanup",
+      "cell": "H3 a local stop with a replaced reservation cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M21 local stop accepts a stale stopper identity",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "stopper.kind !== \"record\" || assertRecordIdentity(stopper.record).kind !== \"match\"",
+      "replace": "stopper.kind !== \"record\"",
+      "expectRed": "H4 a local stop with a stale stopper identity cannot invoke cleanup",
+      "cell": "H4 a local stop with a stale stopper identity cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M22 local stop accepts oversized metadata",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "    if (length > 4096) throw new Error(\"local stop metadata exceeds 4096 bytes\");\n",
+      "replace": "",
+      "expectRed": "H5 oversized local stop metadata cannot invoke cleanup",
+      "cell": "H5 oversized local stop metadata cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     }
   ]
 }

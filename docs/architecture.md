@@ -110,7 +110,9 @@ Machine-local processes use the same registry. The base CLI contributes broker/c
 `local-process` descriptors, while an installed package contributes its own (for example `web`).
 That keeps `cotal down <component>` and `cotal status` extensible without teaching the base CLI
 package-specific pidfiles. A provider process claims its declared pidfile with exclusive create;
-extension removal reserves that same path so startup cannot cross uninstall.
+extension removal reserves that same path so startup cannot cross uninstall. A descriptor may set
+`cooperativeStop` to use the workspace's process-bound local cleanup capability on Windows.
+Manager and delivery declare it; injected hosted services do not use this workstation channel.
 
 Beyond the app-bound connectors, `@cotal-ai/pi` is a **host-native plugin**: a pi extension
 loaded into the user's own pi (CLI or SDK-embedded), placing a Cotal endpoint inside the
