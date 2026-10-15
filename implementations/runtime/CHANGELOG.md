@@ -1,5 +1,18 @@
 # @cotal-ai/runtime
 
+## 0.82.0
+
+### Patch Changes
+
+- d06b27e: A cancelled `turn`, `ask` or escalation whose relay withdrawal is refused for a reason a retry cannot change now fails its step at once with that refusal's code. Before this, every refusal was retried silently every two seconds until the relay's deadline, so a cancelled step against a manager that serves no `cancel` (`not-found`), or an accepting manager with no such relay pending (`failed-precondition`), stayed in its scope for the step's whole timeout. Only `unavailable` and `deadline-exceeded` are still retried until the deadline. A withdrawal the accepting manager refuses is now thrown as an `EpEnvelopeError` carrying its code.
+- Updated dependencies [4f52881]
+- Updated dependencies [6afa12f]
+- Updated dependencies [7c6c109]
+- Updated dependencies [9a93a58]
+  - @cotal-ai/core@0.82.0
+  - @cotal-ai/workspace@0.82.0
+  - @cotal-ai/lang@0.82.0
+
 ## 0.81.1
 
 ### Patch Changes

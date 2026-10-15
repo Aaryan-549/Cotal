@@ -1,5 +1,14 @@
 # @cotal-ai/example-05-scale-showcase
 
+## 0.0.82
+
+### Patch Changes
+
+- Updated dependencies [4f52881]
+- Updated dependencies [6afa12f]
+- Updated dependencies [7c6c109]
+  - @cotal-ai/core@0.82.0
+
 ## 0.0.81
 
 ### Patch Changes

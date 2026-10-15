@@ -1,5 +1,15 @@
 # @cotal-ai/connector-core
 
+## 0.82.0
+
+### Minor Changes
+
+- 6afa12f: The Claude Code MCP server can now be hosted. `serveClaudeSession({ env, input, output })`, exported from `@cotal-ai/connector-claude-code/mcp`, serves one managed session over the streams it is given and reads its launch env only from `env`, so one process can serve several sessions. Each call snapshots that complete environment for its presence label, bearer commands, carried-fork records and feedback contact lookup, including Git; it does not merge the host environment. Hosted feedback reads only the session's global Git configuration, including includes, so the host repository cannot supply its contact. Legacy tool hosts that omit the environment retain their existing repository lookup. The runtime subpath exports only `serveClaudeSession`. `EndpointOptions.environment` accepts an explicit presence label, or `null` to omit it without reading `COTAL_ENVIRONMENT`; an omitted option preserves process inheritance. The subpath includes CommonJS declarations for TypeScript hosts. Direct stdio launches remain supported and also shut down on input closure; a failure in that teardown exits with code 1. Hosted teardown releases its input listeners, handles input EOF and transport closure, refuses input that ends during startup, and reports teardown failures without an unhandled rejection in the host. A pending broker dial that fails after shutdown begins no longer makes close fail or strands local inbox custody. Shutdown still waits for pending start and reconnect work, proves every owned connection closed, and propagates connection-close failures.
+
+### Patch Changes
+
+- 136f366: `cotal_status` with an activity and no status now changes only the activity. It used to read the current status when the tool ran and write it back behind any status write still queued, so a pending `waiting` was published as `working` with its condition cleared, and a pending turn-end `idle` left the seat reading `working`.
+
 ## 0.81.1
 
 ## 0.81.0
