@@ -115,6 +115,16 @@
       "note": "The live token from ps keeps the double space before a one-digit day, so a parser that normalises spacing would read a pin that never matches its own process for the first nine days of every month.",
       "command": "pnpm build > /dev/null && pnpm smoke:pid-identity",
       "afterRestore": "pnpm build > /dev/null"
+    },
+    {
+      "name": "M10 the single-record parser accepts multiple pin lines",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  if (/[\\r\\n]/.test(trimmed)) return { kind: \"unattributable\", raw: trimmed };\n",
+      "replace": "",
+      "expectRed": "P4 multiple pin lines are not a single identity record",
+      "cell": "P4 multiple pin lines are not a single identity record",
+      "command": "pnpm build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm build > /dev/null"
     }
   ]
 }

@@ -98,6 +98,9 @@ try {
     writeFileSync(identityPinPath(own), formatRecord({ pid: process.pid, token: defaultStartToken(process.pid)! }));
     const verdict = verifyIdentityPin(own);
     check("P3 this process's own pin verifies as a match on this platform", verdict.kind === "match", verdict);
+    check("P4 multiple pin lines are not a single identity record", parseRecord("4321 first\n4322 second").kind === "unattributable");
+    check("P5 a newline cannot separate a pid from its token", parseRecord("4321\n28870819").kind === "unattributable");
+    check("P6 a carriage return cannot occur inside a token", parseRecord("4321 first\rsecond").kind === "unattributable");
   }
 
   // ── A. THE MISMATCH REFUSAL on the delivery daemon's own stop path (#969 acceptance 1) ─────
