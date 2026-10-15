@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -32,6 +33,8 @@ check("snapshot publication reuses qualified versions", () => {
   assert(!steps.some((step) => step.run?.includes("changeset version")));
 });
 const source = "a".repeat(40);
+const candidateBytes = JSON.stringify({ source, syntheticVerifierFixture: true });
+const candidateSha256 = createHash("sha256").update(candidateBytes).digest("hex");
 const current = { name: "one", version: "1.0.0", scripts: { build: "real-build" }, dependencies: { two: "workspace:*", external: "^1" } };
 const prepared = { ...current, version: "1.0.1-next-20261015000000", dependencies: { two: "1.0.1-next-20261015000000", external: "^1" } };
 const row = { name: "one", path: "/fixture/one", manifest: current };
@@ -57,14 +60,16 @@ try {
   let firstFile;
   for (const [i, runner] of runners.entries()) for (const node of [22, 24, 26]) {
     const dir = join(fixture, `cold-result-${runner}-node${node}`); mkdirSync(dir);
-    const value = { source, complete: true, platform: platforms[i][0], arch: platforms[i][1], node: `v${node}.0.0`, assertions: checks.length, checks, generations: [0, 1].map((round) => ["nats", "manager", "delivery"].map((name, index) => ({ name: name + ".pid", pid: 100 + index + round * 10, token: `fixture-${round}` }))) };
+    const value = { source, candidateSha256, complete: true, platform: platforms[i][0], arch: platforms[i][1], node: `v${node}.0.0`, assertions: checks.length, checks, generations: [0, 1].map((round) => ["nats", "manager", "delivery"].map((name, index) => ({ name: name + ".pid", pid: 100 + index + round * 10, token: `fixture-${round}` }))) };
     const file = join(dir, "cold-result.json"); writeFileSync(file, JSON.stringify(value)); firstFile ??= file;
   }
-  const verify = () => spawnSync(process.execPath, [join(root, "scripts/verify-cold-results.mjs"), fixture, source], { encoding: "utf8", timeout: 10_000 });
+  const candidate = join(fixture, "manifest.json"); writeFileSync(candidate, candidateBytes);
+  const verify = () => spawnSync(process.execPath, [join(root, "scripts/verify-cold-results.mjs"), fixture, source, candidate], { encoding: "utf8", timeout: 10_000 });
   check("complete synthetic verifier fixtures pass (not native execution)", () => assert.equal(verify().status, 0));
   const original = readFileSync(firstFile, "utf8");
   for (const [name, mutate] of [
     ["another source", (r) => { r.source = "b".repeat(40); }],
+    ["another archive set", (r) => { r.candidateSha256 = "b".repeat(64); }],
     ["incomplete setup", (r) => { r.complete = false; }],
     ["wrong native architecture", (r) => { r.arch = "arm64"; }],
     ["wrong Node major", (r) => { r.node = "v20.0.0"; }],

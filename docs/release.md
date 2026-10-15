@@ -116,8 +116,8 @@ before the next release cut.
      those counts updates its entries in the release PR.
      The workflow rewrites the PR body each time it updates the PR, so add its `Approved-at` line
      after the last update, just before you merge.
-   - When **that** PR is merged, the same workflow detects the bumped versions, runs `pnpm
-     build`, and `pnpm publish`es each changed package to npm with provenance.
+   - When **that** PR is merged, the same workflow builds and qualifies the bumped candidate on
+     every native target, then publishes those qualified archives to npm with provenance.
 
 ## Correcting a released changelog entry
 
@@ -137,6 +137,13 @@ lifecycles. The checks cover native process pins, Manager control, one-shot shut
 shutdown cleanup and fresh process generations after restart. Missing or failed results block
 publication. Logs and source-bound receipts are retained for each platform.
 
+Before packing, the candidate runs every public package's `prepublishOnly` guard in dependency
+order. Packing also runs the package's pack hooks. Native binaries are assembled before these
+steps. Every native receipt names the hash of the candidate manifest, whose entries hash the
+archives. Publication downloads that immutable candidate and those receipts from the same run,
+verifies the whole set, then publishes the archives without rebuilding or rerunning package
+scripts. The publication process does not assemble another native binary set.
+
 A snapshot is versioned before these tests. Publication reuses those tested versions rather than
 generating a new timestamp after qualification.
 
@@ -147,7 +154,7 @@ generating a new timestamp after qualification.
 - one GitHub OIDC exchange per package when the release job exposes the OIDC requester;
 - a GET of each package's trusted-publisher document with that exchanged token, which must list
   a direct `npm publish` Allowed action on THIS repository's `changesets.yml` publisher;
-- only after those checks, the workspace build, native assembly, and recursive publish.
+- only after those checks, publication of the verified qualified archives with provenance.
 
 The preflight first refuses npm access-token environment variables, before invoking pnpm to
 enumerate workspace packages. The registry census prints each package, version, OIDC result and

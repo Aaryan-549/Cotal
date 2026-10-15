@@ -1,7 +1,7 @@
 /**
  * The ARM load job consumes one packed tarball. Native linux-x64 and linux-arm64
- * builder jobs must stay wired into the PR pack path and into Changesets version
- * and snapshot. A deleted `needs` edge or a removed `download-artifact` step
+ * builder jobs must stay wired into the PR pack path and the cold candidate used
+ * by normal and snapshot publication. A deleted dependency or artifact download
  * silently ships one arch, and the assembler/runtime smokes cannot see that edit.
  *
  * This file reads the workflow text. It does not run GitHub's engine. Indentation
@@ -125,55 +125,29 @@ check(
   pack.slice(0, 200),
 );
 
-console.log("\nB. Changesets version path");
-check("changesets.yml declares job version", version.length > 0);
-hasBoth(needsList(version), "changesets.yml version needs both native linux builders");
-hasBoth(downloaded(version), "changesets.yml version downloads both native linux artifacts");
-check(
-  "changesets.yml version publish path runs the shared assembler",
-  /pnpm ci:publish/.test(version) && /seat-assemble-natives\.mjs/.test(ciPublish),
-  { versionHasCiPublish: /pnpm ci:publish/.test(version), ciPublish },
-);
+console.log("\nB. Native candidate before qualification");
+const coldText = readFileSync(join(ROOT, ".github/workflows/cold-setup.yml"), "utf8");
+const coldJobs = jobs(coldText);
+const native = coldJobs.get("native") ?? "";
+const candidate = coldJobs.get("candidate") ?? "";
+const packer = readFileSync(join(ROOT, "scripts/pack-cold-candidate.mjs"), "utf8");
+const publisher = readFileSync(join(ROOT, "scripts/publish-cold-candidate.mjs"), "utf8");
+check("cold candidate needs the native builder matrix", /^\s+needs:\s*native\s*$/m.test(candidate));
+check("cold native matrix builds x64 and arm64 on native Linux", /arch: x64\s+runner: ubuntu-latest/.test(native) && /arch: arm64\s+runner: ubuntu-24.04-arm/.test(native));
+check("cold candidate downloads both native artifacts", ["cold-native-x64", "cold-native-arm64"].every((name) => downloaded(candidate).includes(name)));
+check("cold candidate assembles natives before packing", candidate.indexOf("seat-assemble-natives.mjs") >= 0 && candidate.indexOf("seat-assemble-natives.mjs") < candidate.indexOf("pack-cold-candidate.mjs"));
+check("cold candidate runs prepublish guards before packing", packer.includes('"run", "prepublishOnly"') && packer.indexOf('"run", "prepublishOnly"') < packer.indexOf('"pack", "--pack-destination"'));
 
-check(
-  "Changesets publish builds dependencies before assembly and publication on every retry",
-  ciPublish.startsWith("node scripts/preflight-npm-publish.mjs && pnpm build && node scripts/seat-assemble-natives.mjs && pnpm publish -r "),
-  ciPublish,
-);
-check(
-  "Changesets version job reaches the release preflight before its recursive publish",
-  /publish:\s*pnpm ci:publish/.test(version)
-    && ciPublish.indexOf("preflight-npm-publish.mjs") >= 0
-    && ciPublish.indexOf("preflight-npm-publish.mjs") < ciPublish.indexOf("pnpm publish -r"),
-  { versionHasCiPublish: /publish:\s*pnpm ci:publish/.test(version), ciPublish },
-);
-
-check(
-  "changesets.yml version job is bound to the npm-publish Environment",
-  /^\s+environment:\s*npm-publish\s*$/m.test(version),
-  version.match(/environment.*/)?.[0] ?? "no environment line",
-);
-
-console.log("\nC. Changesets snapshot path");
-check("changesets.yml declares job snapshot", snapshot.length > 0);
-hasBoth(needsList(snapshot), "changesets.yml snapshot needs both native linux builders");
-hasBoth(downloaded(snapshot), "changesets.yml snapshot downloads both native linux artifacts");
-check(
-  "changesets.yml snapshot runs the shared assembler",
-  /scripts\/seat-assemble-natives\.mjs/.test(snapshot),
-);
-check(
-  "Changesets snapshot job reaches the release preflight before its recursive publish",
-  snapshot.indexOf("preflight-npm-publish.mjs") >= 0
-    && snapshot.indexOf("preflight-npm-publish.mjs") < snapshot.indexOf("pnpm publish -r"),
-  snapshot,
-);
-
-check(
-  "changesets.yml snapshot job is bound to the npm-publish Environment",
-  /^\s+environment:\s*npm-publish\s*$/m.test(snapshot),
-  snapshot.match(/environment.*/)?.[0] ?? "no environment line",
-);
+console.log("\nC. Qualified archive publication");
+for (const [name, body] of [["version", version], ["snapshot", snapshot]]) {
+  check(`changesets.yml ${name} requires cold qualification`, needsList(body).includes("cold-setup"));
+  check(`changesets.yml ${name} downloads the qualified candidate and receipts`, downloaded(body).includes("cold-candidate") && /pattern:\s*cold-result-\*/.test(body));
+  check(`changesets.yml ${name} is bound to the npm-publish Environment`, /^\s+environment:\s*npm-publish\s*$/m.test(body));
+}
+check("normal publication invokes the qualified archive publisher", /publish:\s*pnpm ci:publish/.test(version) && ciPublish === "node scripts/publish-cold-candidate.mjs");
+check("snapshot publication invokes the qualified archive publisher", /run: node scripts\/publish-cold-candidate\.mjs/.test(snapshot));
+check("archive publisher reaches the secure preflight before publication", publisher.indexOf("await preflight({ root, env, exec })") >= 0 && publisher.indexOf("await preflight({ root, env, exec })") < publisher.indexOf('exec("pnpm", ["publish"'));
+check("archive publisher does not rebuild or rerun package hooks", publisher.includes('["publish", pkg.archive, "--provenance", "--access=public", "--no-git-checks", "--ignore-scripts"') && !/"build"|"seat-assemble-natives"|"-r"/.test(publisher));
 
 console.log(`\n${fail === 0 ? "SEAT NATIVE CI SMOKE OK" : "SEAT NATIVE CI SMOKE FAILED"}  (${pass} passed, ${fail} failed)`);
 console.log(`SUITE COMPLETE: ${pass} passed, ${fail} failed`);

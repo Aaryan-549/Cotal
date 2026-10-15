@@ -12,7 +12,9 @@ assert(input && output, "usage: npm run test:release-cold -- <candidate-director
 const packs = resolve(input);
 const receipt = resolve(output);
 assert(!existsSync(receipt), "cold setup receipt already exists");
-const manifest = JSON.parse(readFileSync(join(packs, "manifest.json"), "utf8"));
+const manifestBytes = readFileSync(join(packs, "manifest.json"));
+const manifest = JSON.parse(manifestBytes.toString("utf8"));
+const candidateSha256 = createHash("sha256").update(manifestBytes).digest("hex");
 const npmCli = process.env.npm_execpath;
 assert(npmCli && /npm-cli\.js$/.test(npmCli), "run this gate through npm run so the real npm CLI is explicit");
 const base = realpathSync(mkdtempSync(join(tmpdir(), "cotal-release-cold-")));
@@ -124,7 +126,11 @@ try {
   if (started) {
     try { run("cleanup", [cli, "down", "manager", "delivery", "nats"]); } catch (error) { console.error(error.message); }
   }
-  const result = { source: manifest.source, platform: process.platform, arch: process.arch, node: process.version, complete, assertions: checks.length, checks, generations, logsRetained: true };
+  // Keep daemon diagnostics, never the adjacent credentials or other state files.
+  for (const file of readdirSync(join(root, ".cotal")).filter((name) => name.endsWith(".log"))) {
+    writeFileSync(join(logs, "component-" + file), readFileSync(join(root, ".cotal", file)));
+  }
+  const result = { source: manifest.source, candidateSha256, platform: process.platform, arch: process.arch, node: process.version, complete, assertions: checks.length, checks, generations, logsRetained: true };
   mkdirSync(dirname(receipt), { recursive: true }); writeFileSync(receipt, JSON.stringify(result, null, 2) + "\n", { flag: "wx" });
   // A failed lifecycle retains its state for attribution; never remove a potentially live process's root.
   if (complete) rmSync(base, { recursive: true, force: true });

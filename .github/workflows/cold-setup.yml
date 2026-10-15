@@ -117,8 +117,12 @@ jobs:
         with:
           pattern: cold-result-*
           path: cold-results
-      - name: Verify every receipt belongs to this source and platform
-        run: node scripts/verify-cold-results.mjs cold-results "$GITHUB_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: cold-candidate
+          path: cold-candidate
+      - name: Verify every receipt belongs to this source, candidate and platform
+        run: node scripts/verify-cold-results.mjs cold-results "$GITHUB_SHA" cold-candidate/manifest.json
       - name: Require every cold setup
         env:
           NATIVE: ${{ needs.native.result }}

@@ -13,7 +13,9 @@ const packages = rows.filter((row) => !JSON.parse(readFileSync(join(row.path, "p
 const expected = closureFromConfig(readFileSync(join(root, ".changeset/config.json"), "utf8"));
 if (JSON.stringify(packages.map((row) => row.name).sort()) !== JSON.stringify(expected)) throw new Error("cold candidate public package census disagrees with the fixed group");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const manifest = { source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(), packages: [] };
+const guarded = packages.filter((row) => JSON.parse(readFileSync(join(row.path, "package.json"), "utf8")).scripts?.prepublishOnly).map((row) => row.name).sort();
+if (guarded.length) execFileSync("pnpm", ["-r", ...guarded.flatMap((name) => ["--filter", name]), "run", "prepublishOnly"], { cwd: root, stdio: "inherit", timeout: 600_000 });
+const manifest = { source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(), prepublishOnly: guarded, packages: [] };
 for (const row of packages) {
   const before = new Set(readdirSync(output));
   execFileSync("pnpm", ["--dir", row.path, "pack", "--pack-destination", output], { cwd: root, stdio: "inherit", timeout: 180_000 });
