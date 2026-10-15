@@ -91,9 +91,11 @@ try {
     };
     check("P1 a start token with spaces (macOS lstart) reads back as a record", roundTrip("Thu Oct 15 21:16:51 2026"));
     check("P2 a padded one-digit day keeps its double space byte for byte", roundTrip("Thu Oct  5 09:01:02 2026"));
+    // The pin line is written here from this process's live start token, so P3 reads what a launch
+    // on this platform writes without depending on writeIdentityPin, which M4 breaks on purpose.
     const own = join(root, "own.pid");
     writeFileSync(own, String(process.pid));
-    writeIdentityPin(own, process.pid);
+    writeFileSync(identityPinPath(own), formatRecord({ pid: process.pid, token: defaultStartToken(process.pid)! }));
     const verdict = verifyIdentityPin(own);
     check("P3 this process's own pin verifies as a match on this platform", verdict.kind === "match", verdict);
   }
