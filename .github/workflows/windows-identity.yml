@@ -3,10 +3,15 @@ on:
   pull_request:
     paths:
       - packages/workspace/src/pid.ts
+      - packages/workspace/src/local-stop.ts
+      - implementations/cli/src/lib/local-process-stop.ts
       - packages/workspace/smoke/pid-identity.smoke.ts
       - packages/workspace/smoke/win32-creation-native.smoke.ts
       - bin/smoke/mutations/pid-identity.json
       - scripts/mutation-proof.mjs
+      - scripts/release-cold-environment.mjs
+      - scripts/release-cold-environment.d.mts
+      - scripts/release-cold-environment.smoke.mjs
       - .github/workflows/windows-identity.yml
   push:
     branches: [main]
@@ -30,6 +35,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cotal-ai/core --filter @cotal-ai/workspace build
       - run: pnpm --filter @cotal-ai/workspace typecheck
+      - run: node scripts/release-cold-environment.smoke.mjs
+      - name: Read native identity from the first empty profile
+        run: node --import tsx packages/workspace/smoke/win32-creation-native.smoke.ts
       - name: Prove the native cold read and its named reversion
         env:
           PROOF_CONFIG: ${{ runner.temp }}/windows-creation-proof.json
@@ -44,6 +52,27 @@ jobs:
             const cell="W1 a cold Windows process has a native creation token";
             const proof={suite:["packages/workspace/smoke/win32-creation-native.smoke.ts"],command,mutations:[{...mutation,command,expectRed:cell,cell}]};
             delete proof.mutations[0].afterRestore;
+            writeFileSync(process.env.PROOF_CONFIG,JSON.stringify(proof,null,2));
+          '
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/mutation-proof.mjs --config "$env:PROOF_CONFIG"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --exit-code
+      - name: Prove the native cooperative stop route
+        env:
+          PROOF_CONFIG: ${{ runner.temp }}/windows-local-stop-proof.json
+        shell: pwsh
+        run: |
+          node --input-type=module -e '
+            import {writeFileSync} from "node:fs";
+            const command=JSON.stringify(process.execPath.replaceAll("\\","/"))+" --import tsx packages/workspace/smoke/pid-identity.smoke.ts";
+            const cell="C1 a MATCHING pin IS torn down (SIGTERM, death confirmed, record cleared)";
+            const proof={suite:["packages/workspace/smoke/pid-identity.smoke.ts"],command,mutations:[{
+              name:"Windows stop bypasses cooperative cleanup",
+              file:"implementations/cli/src/lib/local-process-stop.ts",
+              find:"  const cooperative = process.platform === \"win32\" && component.cooperativeStop === true;",
+              replace:"  const cooperative = false;",expectRed:cell,cell
+            }]};
             writeFileSync(process.env.PROOF_CONFIG,JSON.stringify(proof,null,2));
           '
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

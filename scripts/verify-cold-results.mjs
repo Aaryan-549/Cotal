@@ -24,6 +24,8 @@ export function verifyColdResults(directory, source, candidateSha256) {
       for (const round of [0, 1]) {
         for (const name of ["Manager, delivery and broker survive startup", "native Manager control answers", "empty Manager roster is an empty JSONL stream", "native shutdown policy is accepted once", "owned broker listener closed"])
           assert(result.checks.includes(`round ${round} ${name}`), "cold result omitted a required lifecycle assertion");
+        if (platform === "win32") for (const component of ["manager", "delivery"])
+          assert(result.checks.includes(`round ${round} Windows ${component} cleanup handler ran`), "cold result omitted native Windows cleanup evidence");
       }
       assert(result.checks.includes("cold restart replaces every process generation"), "cold result omitted restart identity comparison");
       assert(result.checks.includes("native process identity round-trips before daemon startup"), "cold result omitted the first native identity read");

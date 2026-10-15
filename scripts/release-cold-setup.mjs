@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { createServer, createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { coldOsEnvironment } from "./release-cold-environment.mjs";
 
 const [input, output] = process.argv.slice(2);
 assert(input && output, "usage: npm run test:release-cold -- <candidate-directory> <receipt.json>");
@@ -27,12 +28,10 @@ mkdirSync(join(root, ".cotal"));
 writeFileSync(join(installed, "package.json"), JSON.stringify({ private: true, type: "module" }));
 writeFileSync(join(base, "user.npmrc"), "");
 writeFileSync(join(base, "global.npmrc"), "");
-const env = {};
-for (const key of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "CI", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"]) {
-  if (process.env[key] !== undefined) env[key] = process.env[key];
-}
+const env = coldOsEnvironment();
 Object.assign(env, {
   HOME: home, USERPROFILE: home, COTAL_HOME: join(home, ".cotal"), XDG_CONFIG_HOME: join(home, "xdg"),
+  XDG_CACHE_HOME: join(home, "cache"), XDG_DATA_HOME: join(home, "data"),
   APPDATA: join(home, "AppData/Roaming"), LOCALAPPDATA: join(home, "AppData/Local"),
   TMPDIR: join(base, "tmp"), TMP: join(base, "tmp"), TEMP: join(base, "tmp"),
   npm_config_cache: join(base, "npm-cache"), npm_config_userconfig: join(base, "user.npmrc"),
@@ -116,7 +115,15 @@ try {
     const file = join(logs, `generation-${round}.json`); writeFileSync(file, JSON.stringify(stable) + "\n");
     if (generations.length) check("cold restart replaces every process generation", stable.every((row) => !generations[0].some((old) => old.pid === row.pid && old.token === row.token)));
     generations.push(stable);
+    const cleanupLogs = process.platform === "win32" ? ["manager", "delivery"].map((component) => {
+      const name = readdirSync(join(root, ".cotal")).find((name) => name.startsWith(component + ".") && name.endsWith(".log"));
+      assert(name, `missing ${component} cleanup log`);
+      const path = join(root, ".cotal", name);
+      return { component, path, offset: readFileSync(path).length };
+    }) : [];
     run(`down-${round}`, [cli, "down", "manager", "delivery", "nats"]);
+    for (const { component, path, offset } of cleanupLogs)
+      check(`round ${round} Windows ${component} cleanup handler ran`, readFileSync(path).subarray(offset).toString("utf8").includes(`• ${component}: received local stop request, exiting`));
     run(`stopped-${round}`, [inspect, installed, root, "stopped", file]);
     check(`round ${round} owned broker listener closed`, await closedPort());
     started = false;

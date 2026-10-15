@@ -57,6 +57,7 @@ try {
   const platforms = [["linux", "x64"], ["linux", "arm64"], ["darwin", "x64"], ["darwin", "arm64"], ["win32", "x64"], ["win32", "arm64"]];
   const checks = ["cold restart replaces every process generation", "native process identity round-trips before daemon startup"];
   for (const round of [0, 1]) for (const name of ["Manager, delivery and broker survive startup", "native Manager control answers", "empty Manager roster is an empty JSONL stream", "native shutdown policy is accepted once", "owned broker listener closed"]) checks.push(`round ${round} ${name}`);
+  for (const round of [0, 1]) for (const component of ["manager", "delivery"]) checks.push(`round ${round} Windows ${component} cleanup handler ran`);
   let firstFile;
   for (const [i, runner] of runners.entries()) for (const node of [22, 24, 26]) {
     const dir = join(fixture, `cold-result-${runner}-node${node}`); mkdirSync(dir);
@@ -79,6 +80,16 @@ try {
   ]) check(`receipt verifier refuses ${name}`, () => {
     const value = JSON.parse(original); mutate(value); writeFileSync(firstFile, JSON.stringify(value));
     assert.equal(verify().status, 1); writeFileSync(firstFile, original);
+  });
+  const windowsFile = join(fixture, "cold-result-windows-latest-node22", "cold-result.json");
+  const windowsOriginal = readFileSync(windowsFile, "utf8");
+  for (const component of ["manager", "delivery"]) check(`receipt verifier refuses missing Windows ${component} cleanup`, () => {
+    const value = JSON.parse(windowsOriginal);
+    value.checks = value.checks.filter((name) => name !== `round 0 Windows ${component} cleanup handler ran`);
+    value.assertions = value.checks.length;
+    writeFileSync(windowsFile, JSON.stringify(value));
+    assert.equal(verify().status, 1);
+    writeFileSync(windowsFile, windowsOriginal);
   });
   rmSync(firstFile);
   check("receipt verifier refuses an absent platform result", () => assert.equal(verify().status, 1));

@@ -377,8 +377,12 @@ it: every manager stop stops and deprovisions them, and `down` reports them as s
 stop the CLI makes runs this one path: `down`, Ctrl-C on a foreground `cotal up`, the teardown after
 that `up`'s broker exits, the leftover-manager stop before `cotal up -f`, and the delivery cutover.
 Each holds the manager's stop reservation, so a second stop while one is in flight is refused,
-names the process holding it, and leaves that stop's `--with-agents` policy in place. Each sends
-`SIGKILL` to a manager still running 15s after `SIGTERM`. Ctrl-C stops the manager first; when that
+names the process holding it, and leaves that stop's `--with-agents` policy in place. On Windows,
+manager and delivery stops send an authenticated local cleanup request because Windows process
+signals terminate without running cleanup handlers. The request requires the process's private
+capability, its creation identity and the live stopper's identity and reservation. Other platforms
+use `SIGTERM`. A process still running after 20s on the Windows cooperative path, or 15s after
+`SIGTERM`, receives `SIGKILL`. Ctrl-C stops the manager first; when that
 stop is refused or the manager's exit cannot be confirmed, Ctrl-C signals nothing else, prints the
 refusal with the reap route, and leaves the stack running; end it with `cotal down --with-agents`.
 `--with-agents` is a one-shot destructive policy bound to the exact verified manager process
@@ -428,8 +432,9 @@ that names a different start means the pid was reused, so teardown refuses and p
 or unreadable pin also refuses. macOS start tokens keep their spaces, including the padded day,
 in both the identity pin and the one-shot shutdown intent. A single record cannot span lines.
 On Windows, the reader uses .NET `Process.StartTime` through PowerShell and converts it to UTC
-FILETIME. It does not load management cmdlets during a cold launch. The read allows up to ten
-seconds for a fresh PowerShell runtime to start; it does not retry or accept an unreadable pin.
+FILETIME. It does not load management cmdlets during a cold launch. The first invocation allows ten
+seconds. A timeout triggers one immediate retry limited to five seconds. Other failures and a second
+timeout leave identity unverified; an unreadable pin still refuses teardown.
 
 The pidfile and its pin are published by renames, and the pidfile rename is the commit point. Just
 before it, the pin holds two lines: the old process's and the new one's. A launcher that dies
@@ -460,8 +465,12 @@ dead, still refuses. Inspect both pids with `ps`. Do not delete `<pidfile>.ident
 stop; that weakens target-identity protection. Once the pidfile process is dead, rerunning
 teardown clears the stale record automatically.
 
-The first teardown after upgrading a running pre-pin stack has a narrower guarantee. A live record
-with no identity pin is signalled after a loud warning that it predates identity pinning. Restarting
+A Windows manager or delivery daemon without the cooperative capability must be stopped through
+its original supervisor before restarting with this version. Teardown refuses it without signalling
+or deleting its live record. It does not wait for a lease to expire or delete a lease by local pid.
+
+On other platforms, the first teardown after upgrading a running pre-pin stack has a narrower
+guarantee. A live record with no identity pin is signalled after a loud warning that it predates identity pinning. Restarting
 the component writes the pin, so later teardowns receive full match and mismatch protection. The
 same warning applies on platforms where no stable start token is available. For a legacy manager,
 bare `cotal down` also warns that agent sparing cannot be verified before it signals. Because the

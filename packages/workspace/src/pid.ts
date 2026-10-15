@@ -298,26 +298,29 @@ export function parseWin32CreationToken(raw: string): string | undefined {
  * may spend a PowerShell spawn: the token must be STABLE, not cheap. .NET `Process.StartTime`
  * converted to UTC FILETIME is fixed for the life of that pid and changes when the number is
  * reused. Read the API directly so a cold profile does not need management cmdlet discovery.
- * Allow ten seconds for a fresh PowerShell runtime, whose first start can exceed five seconds.
- * `undefined` means the process is gone or PowerShell could not answer.
+ * Allow ten seconds for a fresh runtime. A timed-out invocation gets one immediate five-second
+ * retry; other failures remain unreadable. `undefined` means the process is gone or could not be read.
  */
 export function win32ProcessCreationToken(pid: number): string | undefined {
   if (!Number.isInteger(pid) || pid <= 0) return undefined;
-  try {
-    const out = execFileSync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 },
-    );
-    return parseWin32CreationToken(out);
-  } catch {
-    return undefined;
+  for (const timeout of [10_000, 5_000]) {
+    try {
+      const out = execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout },
+      );
+      return parseWin32CreationToken(out);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ETIMEDOUT") return undefined;
+    }
   }
+  return undefined;
 }
 
 /** Identity's start-token reader: POSIX uses the same `/proc`/`ps` implementation as the advisory

@@ -26,9 +26,10 @@
  * Run: pnpm smoke:pid-identity
  */
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import childProcess, { spawn } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +37,7 @@ import {
   defaultStartToken, formatRecord, identityPinPath, identityStartToken, parsePid, parseRecord,
   parseWin32CreationToken, verifyIdentityPin, win32ProcessCreationToken, writeIdentityPin, writePidPair,
 } from "../src/pid.js";
+import { requestLocalStop } from "../src/local-stop.js";
 
 const prevCwd = process.cwd();
 const root = mkdtempSync(join(tmpdir(), "pid-identity-"));
@@ -72,6 +74,20 @@ const spawnForeign = (as?: "supervise" | "deliver"): { child: ReturnType<typeof 
 };
 
 const strays: ReturnType<typeof spawn>[] = [];
+const spawnLocalTarget = async (pidPath: string): Promise<ReturnType<typeof spawn>> => {
+  const code = `import { listenForLocalStop } from ${JSON.stringify(new URL("../src/local-stop.ts", import.meta.url).href)};
+    listenForLocalStop(${JSON.stringify(pidPath)}, () => process.exit(0));
+    process.send("ready"); setInterval(() => {}, 1000);`;
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", code, "deliver"], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+  strays.push(child);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("local stop child did not become ready")), 30_000);
+    child.once("message", () => { clearTimeout(timer); resolve(); });
+    child.once("exit", (code) => { clearTimeout(timer); reject(new Error(`local stop child exited before ready (${code})`)); });
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+  });
+  return child;
+};
 try {
   await wait(200); // let every child install its SIGTERM handler before any cell runs
 
@@ -184,11 +200,13 @@ try {
   // ── C. THE HAPPY PATH still tears down: a MATCHING pin is signalled and its death confirmed ─
   {
     const { stopDelivery } = await import("../../../implementations/cli/src/lib/delivery-proc.js");
-    const target = spawnTarget("deliver");
+    const target = process.platform === "win32"
+      ? await spawnLocalTarget(join(root, ".cotal", "delivery.pid")).then((child) => ({ child, pid: child.pid }))
+      : spawnTarget("deliver");
     strays.push(target.child);
     await wait(150);
     const token = defaultStartToken(target.pid!); // the REAL start token of the REAL process
-    assert.ok(token !== undefined, "this host must expose a start token for the happy-path cell (Linux/macOS do; a Windows run is the named gap)");
+    assert.ok(token !== undefined, "this host must expose a native start token for the happy-path cell");
     writeFileSync(join(root, ".cotal", "delivery.pid"), String(target.pid));
     writeFileSync(join(root, ".cotal", "delivery.pid.identity"), formatRecord({ pid: target.pid!, token }));
     await stopDelivery();
@@ -222,11 +240,20 @@ try {
     let warning = "";
     const originalError = console.error;
     console.error = (...args: unknown[]) => { warning += `${args.join(" ")}\n`; };
+    let legacyRefusal: string | undefined;
     try { await stopDelivery(); }
+    catch (error) { legacyRefusal = (error as Error).message; }
     finally { console.error = originalError; }
     await wait(200);
-    check("E1 a LEGACY (unpinned) live record is signalled with a loud reduced-guarantee warning", foreign.child.exitCode === 9 && /predates process identity pinning/.test(warning) && /without an identity check/.test(warning) && /relaunch will pin/.test(warning), { exitCode: foreign.child.exitCode, warning });
-    check("E2 the legacy record auto-clears after confirmed death", !existsSync(join(root, ".cotal", "delivery.pid")));
+    if (process.platform === "win32") {
+      check("E1 Windows cooperative teardown refuses a live legacy daemon", /no creation identity for cooperative shutdown/.test(legacyRefusal ?? "") && foreign.child.exitCode === null);
+      check("E2 Windows preserves the refused legacy record", existsSync(join(root, ".cotal", "delivery.pid")));
+      reap(foreign.child);
+    } else {
+      assert.equal(legacyRefusal, undefined);
+      check("E1 a LEGACY (unpinned) live record is signalled with a loud reduced-guarantee warning", foreign.child.exitCode === 9 && /predates process identity pinning/.test(warning) && /without an identity check/.test(warning) && /relaunch will pin/.test(warning), { exitCode: foreign.child.exitCode, warning });
+      check("E2 the legacy record auto-clears after confirmed death", !existsSync(join(root, ".cotal", "delivery.pid")));
+    }
     const torn = spawnForeign("deliver");
     strays.push(torn.child);
     await wait(150);
@@ -274,12 +301,15 @@ try {
     // This guards command construction only; the native Windows cold suite executes the OS read.
     const originalExec = childProcess.execFileSync;
     let nativeQuery = false;
-    let nativeTimeout: unknown;
+    const nativeTimeouts: unknown[] = [];
+    let mode = "success";
     childProcess.execFileSync = ((file: unknown, args: unknown, ...rest: unknown[]) => {
       if (file === "powershell.exe") {
         nativeQuery = Array.isArray(args) && args[3] === "[System.Diagnostics.Process]::GetProcessById(4242).StartTime.ToUniversalTime().ToFileTimeUtc()";
-        nativeTimeout = (rest[0] as { timeout?: unknown } | undefined)?.timeout;
-        return win32Token;
+        nativeTimeouts.push((rest[0] as { timeout?: unknown } | undefined)?.timeout);
+        if (mode === "denied" || mode === "timeout" || (mode === "timeout-once" && nativeTimeouts.length === 1))
+          throw Object.assign(new Error("synthetic native query failure"), { code: mode === "denied" ? "EACCES" : "ETIMEDOUT" });
+        return mode === "malformed" ? "not-a-filetime" : win32Token;
       }
       return Reflect.apply(originalExec, childProcess, [file, args, ...rest]);
     }) as typeof originalExec;
@@ -287,7 +317,23 @@ try {
     try {
       const token = win32ProcessCreationToken(4242);
       check("F7 win32 creation asks the native Process API without a cmdlet", token === win32Token && nativeQuery);
-      check("F8 win32 creation allows a bounded ten-second cold runtime start", nativeTimeout === 10_000);
+      check("F8 win32 creation allows a bounded ten-second cold runtime start", nativeTimeouts[0] === 10_000);
+      mode = "timeout-once";
+      nativeTimeouts.length = 0;
+      const retried = win32ProcessCreationToken(4242);
+      check("F9 win32 creation retries a timeout once with a five-second bound", retried === win32Token && nativeTimeouts.length === 2 && nativeTimeouts[0] === 10_000 && nativeTimeouts[1] === 5000);
+      mode = "denied";
+      nativeTimeouts.length = 0;
+      const denied = win32ProcessCreationToken(4242);
+      check("F10 win32 creation does not retry a non-timeout failure", denied === undefined && nativeTimeouts.length === 1);
+      mode = "timeout";
+      nativeTimeouts.length = 0;
+      const timedOut = win32ProcessCreationToken(4242);
+      check("F11 win32 creation refuses after the second timeout", timedOut === undefined && nativeTimeouts.length === 2);
+      mode = "malformed";
+      nativeTimeouts.length = 0;
+      const malformed = win32ProcessCreationToken(4242);
+      check("F12 win32 creation refuses malformed output without a retry", malformed === undefined && nativeTimeouts.length === 1);
     } finally {
       childProcess.execFileSync = originalExec;
       syncBuiltinESMExports();
@@ -362,6 +408,42 @@ try {
 
     check("G6 no `.publish.` temporary survives ANY of G1 through G5",
       !readdirSync(join(root, ".cotal")).some((n) => n.includes(".publish.")));
+  }
+
+  // The real local control channel runs on every host; Windows CLI routing is qualified natively.
+  {
+    const pidPath = join(root, ".cotal", "local-control.pid");
+    const child = await spawnLocalTarget(pidPath);
+    const target = { pid: child.pid!, token: defaultStartToken(child.pid!)! };
+    const prefix = join(root, ".cotal", "local-stop", `local-control.pid.${createHash("sha256").update(formatRecord(target)).digest("base64url")}`);
+    const capability = JSON.parse(readFileSync(`${prefix}.ready`, "utf8")) as { token: string };
+    const marker = `${pidPath}.stopping`;
+    writeFileSync(marker, String(process.pid));
+    const stat = lstatSync(marker);
+    const frame = { version: 1, target: formatRecord(target), token: capability.token,
+      stopper: formatRecord({ pid: process.pid, token: defaultStartToken(process.pid)! }), reservation: `${stat.dev}:${stat.ino}` };
+    const rejected = async (name: string, data: string): Promise<void> => {
+      writeFileSync(`${prefix}.request`, data);
+      const until = Date.now() + 20_000;
+      while (Date.now() < until && (existsSync(`${prefix}.request`) || readdirSync(join(root, ".cotal", "local-stop")).some((name) => name.endsWith(".consuming")))) await wait(50);
+      check(name, child.exitCode === null && !existsSync(`${prefix}.request`) && !readdirSync(join(root, ".cotal", "local-stop")).some((name) => name.endsWith(".consuming")));
+    };
+    await rejected("H1 a local stop without its private nonce cannot invoke cleanup", JSON.stringify({ ...frame, token: "0".repeat(64) }));
+    await rejected("H2 a local stop for another process generation cannot invoke cleanup", JSON.stringify({ ...frame, target: `${frame.target}other` }));
+    await rejected("H3 a local stop with a replaced reservation cannot invoke cleanup", JSON.stringify({ ...frame, reservation: "different-inode" }));
+    await rejected("H4 a local stop with a stale stopper identity cannot invoke cleanup", JSON.stringify({ ...frame, stopper: `${frame.stopper}other` }));
+    await rejected("H5 oversized local stop metadata cannot invoke cleanup", `${JSON.stringify(frame)}${" ".repeat(4097)}`);
+    const successor = join(root, ".cotal", "local-stop", `local-control.pid.${createHash("sha256").update(`${formatRecord(target)}other`).digest("base64url")}.ready`);
+    writeFileSync(successor, "successor capability");
+    const cleanup = requestLocalStop(pidPath, { target, stopper: { pid: process.pid, marker } });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("authenticated local stop did not complete")), 20_000);
+      child.once("exit", (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`local stop child exit ${code}`)); });
+    });
+    cleanup(true);
+    check("H6 an authenticated local stop reaches the real cleanup handler", child.exitCode === 0);
+    check("H7 a predecessor stop leaves a successor capability intact", existsSync(successor) && !existsSync(`${prefix}.ready`));
+    rmSync(marker);
   }
 } finally {
   for (const s of strays) reap(s);

@@ -23,7 +23,7 @@ import {
   type ParsedArgs,
 } from "@cotal-ai/core";
 import {
-  authDir, canonicalLocalProcessPath, consumeManagerShutdownIntent, findCotalRoot, getSpaceAuth, hasUserAuthState, isWorkspaceTargetError, loadManagerInstanceIdentity, parsePositiveIntegerFlag, publishManagerSpareCapability, reclaimDeadPreUpgradeRecord, removePidPair, resolveMeshTarget, soleSpaceOf, userAuthStateDir, workspaceSecretStore, writePidPair,
+  authDir, canonicalLocalProcessPath, consumeManagerShutdownIntent, findCotalRoot, getSpaceAuth, hasUserAuthState, isWorkspaceTargetError, listenForLocalStop, loadManagerInstanceIdentity, parsePositiveIntegerFlag, publishManagerSpareCapability, reclaimDeadPreUpgradeRecord, removePidPair, resolveMeshTarget, soleSpaceOf, userAuthStateDir, workspaceSecretStore, writePidPair,
   c, MANAGER_DELIVERY_AWARE_MARKER, MANAGER_PIDFILE,
   refreshRegistrationPolicy,
   type MeshEntry,
@@ -499,21 +499,11 @@ async function runManager(args: ParsedArgs, defaultRuntime: RuntimeMode): Promis
     console.error(c.red(`✗ ${(e as Error).message}`));
     process.exit(1);
   }
-  await mgr.start();
-  // AFTER start, not before: a manager that failed to come up must not leave a record claiming it
-  // did. `findCotalRoot` is the same root the Manager itself defaulted to.
   const managerRoot = findCotalRoot();
-  const releasePidRecord = recordManagerPid(managerRoot, space);
   const managerContext = { root: managerRoot, space };
-  publishManagerSpareCapability(managerContext, mgr.spareSeats);
-  console.log(
-    c.green("✓ manager up") +
-      c.dim(` (space ${space} · ${mgr.runtimeKind})`) +
-      `\n  console: ${mgr.consoleUrl}` +
-      c.dim("\n  spawn: cotal spawn --detach <persona>   ·   stop: cotal stop --name <n>   (Ctrl-C to shut down)"),
-  );
-  // Register shutdown handlers before any spawning. Signals use the sparing default; the exact,
-  // process-bound `cotal down --with-agents` intent is the only mass-reap request.
+  let releasePidRecord: (() => void) | undefined;
+  // Signals and cooperative requests share the sparing default. Only the process-bound
+  // `cotal down --with-agents` intent authorizes an agent reap.
   let shuttingDown = false;
   const shutdown = () => {
     if (shuttingDown) return;
@@ -523,7 +513,7 @@ async function runManager(args: ParsedArgs, defaultRuntime: RuntimeMode): Promis
     void mgr.stop({ withAgents: decision.withAgents })
     .then(() => {
       publishManagerSpareCapability(managerContext, false);
-      releasePidRecord();
+      releasePidRecord?.();
       process.exit(0);
     })
     .catch((e) => {
@@ -535,6 +525,21 @@ async function runManager(args: ParsedArgs, defaultRuntime: RuntimeMode): Promis
       process.exit(1);
     });
   };
+  const disposeLocalStop = process.platform === "win32"
+    ? listenForLocalStop(canonicalLocalProcessPath(MANAGER_PIDFILE, managerContext), shutdown)
+    : undefined;
+  try { await mgr.start(); }
+  catch (error) { disposeLocalStop?.(); throw error; }
+  // The control capability precedes the pid record, so a stop cannot observe a ready manager
+  // before its cooperative endpoint exists. A failed start still publishes no pid record.
+  releasePidRecord = recordManagerPid(managerRoot, space);
+  publishManagerSpareCapability(managerContext, mgr.spareSeats);
+  console.log(
+    c.green("✓ manager up") +
+      c.dim(` (space ${space} · ${mgr.runtimeKind})`) +
+      `\n  console: ${mgr.consoleUrl}` +
+      c.dim("\n  spawn: cotal spawn --detach <persona>   ·   stop: cotal stop --name <n>   (Ctrl-C to shut down)"),
+  );
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   // Declarative boot: bring up each rostered agent through the same spawn path as a detached spawn.

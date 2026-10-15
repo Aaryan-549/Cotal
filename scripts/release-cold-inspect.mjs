@@ -27,7 +27,8 @@ if (mode === "running") {
       try { const stat = readFileSync(`/proc/${row.pid}/stat`, "utf8"); zombie = stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z "); } catch {}
     }
     const current = workspace.defaultStartToken(row.pid);
-    if (!zombie && current === row.token) throw new Error(`cold setup: ${row.name} generation still lives`);
+    if (!zombie && workspace.probeLiveness(row.pid) !== "dead")
+      assert(current !== undefined && current !== row.token, `cold setup: ${row.name} generation is live or its exit cannot be verified`);
   }
   const remaining = readdirSync(dir).filter((name) => name.endsWith(".pid") || name.endsWith(".pid.identity"));
   if (remaining.length) throw new Error(`cold setup: process records remain: ${remaining.join(", ")}`);
