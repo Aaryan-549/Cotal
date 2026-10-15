@@ -298,6 +298,7 @@ export function parseWin32CreationToken(raw: string): string | undefined {
  * may spend a PowerShell spawn: the token must be STABLE, not cheap. .NET `Process.StartTime`
  * converted to UTC FILETIME is fixed for the life of that pid and changes when the number is
  * reused. Read the API directly so a cold profile does not need management cmdlet discovery.
+ * Allow ten seconds for a fresh PowerShell runtime, whose first start can exceed five seconds.
  * `undefined` means the process is gone or PowerShell could not answer.
  */
 export function win32ProcessCreationToken(pid: number): string | undefined {
@@ -311,7 +312,7 @@ export function win32ProcessCreationToken(pid: number): string | undefined {
         "-Command",
         `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,
       ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 },
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 },
     );
     return parseWin32CreationToken(out);
   } catch {

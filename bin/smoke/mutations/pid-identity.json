@@ -135,6 +135,16 @@
       "cell": "F7 win32 creation asks the native Process API without a cmdlet",
       "command": "pnpm build > /dev/null && pnpm smoke:pid-identity",
       "afterRestore": "pnpm build > /dev/null"
+    },
+    {
+      "name": "M12 the Windows reader cuts off a measured cold runtime start",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "      { encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"], timeout: 10_000 },",
+      "replace": "      { encoding: \"utf8\", stdio: [\"ignore\", \"pipe\", \"ignore\"], timeout: 5000 },",
+      "expectRed": "F8 win32 creation allows a bounded ten-second cold runtime start",
+      "cell": "F8 win32 creation allows a bounded ten-second cold runtime start",
+      "command": "pnpm build > /dev/null && pnpm smoke:pid-identity",
+      "afterRestore": "pnpm build > /dev/null"
     }
   ]
 }
