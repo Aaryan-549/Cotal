@@ -64,8 +64,9 @@ function exactIntent(value: unknown): ManagerShutdownIntent | undefined {
     const process = value as Record<string, unknown>;
     if (Object.keys(process).sort().join(",") !== "pid,token") return undefined;
     if (typeof process.pid !== "number" || parsePid(String(process.pid)) !== process.pid) return undefined;
-    if (typeof process.token !== "string" || process.token === "" || /\s/.test(process.token)) return undefined;
-    return { pid: process.pid, token: process.token };
+    if (typeof process.token !== "string") return undefined;
+    const parsed = parseRecord(`${process.pid} ${process.token}`);
+    return parsed.kind === "record" && parsed.record.token === process.token ? parsed.record : undefined;
   };
   if (row.version === 1) {
     const target = exactRecord(row.target);
