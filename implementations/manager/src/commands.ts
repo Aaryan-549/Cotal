@@ -526,7 +526,10 @@ async function runManager(args: ParsedArgs, defaultRuntime: RuntimeMode): Promis
     });
   };
   const disposeLocalStop = process.platform === "win32"
-    ? listenForLocalStop(canonicalLocalProcessPath(MANAGER_PIDFILE, managerContext), shutdown)
+    ? listenForLocalStop(canonicalLocalProcessPath(MANAGER_PIDFILE, managerContext), () => {
+      console.error(`• manager: received local stop request, exiting (space ${space})`);
+      shutdown();
+    })
     : undefined;
   try { await mgr.start(); }
   catch (error) { disposeLocalStop?.(); throw error; }
