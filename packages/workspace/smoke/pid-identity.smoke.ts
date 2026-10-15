@@ -274,9 +274,11 @@ try {
     // This guards command construction only; the native Windows cold suite executes the OS read.
     const originalExec = childProcess.execFileSync;
     let nativeQuery = false;
+    let nativeTimeout: unknown;
     childProcess.execFileSync = ((file: unknown, args: unknown, ...rest: unknown[]) => {
       if (file === "powershell.exe") {
         nativeQuery = Array.isArray(args) && args[3] === "[System.Diagnostics.Process]::GetProcessById(4242).StartTime.ToUniversalTime().ToFileTimeUtc()";
+        nativeTimeout = (rest[0] as { timeout?: unknown } | undefined)?.timeout;
         return win32Token;
       }
       return Reflect.apply(originalExec, childProcess, [file, args, ...rest]);
@@ -285,6 +287,7 @@ try {
     try {
       const token = win32ProcessCreationToken(4242);
       check("F7 win32 creation asks the native Process API without a cmdlet", token === win32Token && nativeQuery);
+      check("F8 win32 creation allows a bounded ten-second cold runtime start", nativeTimeout === 10_000);
     } finally {
       childProcess.execFileSync = originalExec;
       syncBuiltinESMExports();
