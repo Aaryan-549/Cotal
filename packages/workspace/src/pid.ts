@@ -253,6 +253,7 @@ export type ReadRecord = { kind: "record"; record: ProcessIdentityRecord } | { k
 export function parseRecord(raw: string): ReadRecord {
   const trimmed = raw.trim();
   if (trimmed === "") return { kind: "husk" };
+  if (/[\r\n]/.test(trimmed)) return { kind: "unattributable", raw: trimmed };
   // The first field is the pid and everything after the first space is the token, kept byte for byte:
   // a macOS start token has spaces of its own, and the live token it is compared with keeps them too.
   const gap = trimmed.search(/\s/);
