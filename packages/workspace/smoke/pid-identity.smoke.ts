@@ -30,7 +30,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   defaultStartToken, formatRecord, identityPinPath, identityStartToken, parsePid, parseRecord,
@@ -76,8 +76,9 @@ const strays: ReturnType<typeof spawn>[] = [];
 const spawnLocalTarget = async (pidPath: string): Promise<ReturnType<typeof spawn>> => {
   const code = `import { listenForLocalStop } from ${JSON.stringify(new URL("../src/local-stop.ts", import.meta.url).href)};
     listenForLocalStop(${JSON.stringify(pidPath)}, () => process.exit(0));
+    process.on("message", (message) => { if (message === "probe") process.send("alive"); });
     process.send("ready"); setInterval(() => {}, 1000);`;
-  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", code, "deliver"], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", code, "deliver"], { cwd: prevCwd, stdio: ["ignore", "ignore", "inherit", "ipc"] });
   strays.push(child);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("local stop child did not become ready")), 30_000);
@@ -87,6 +88,7 @@ const spawnLocalTarget = async (pidPath: string): Promise<ReturnType<typeof spaw
   });
   return child;
 };
+let suiteFailed = false;
 try {
   await wait(200); // let every child install its SIGTERM handler before any cell runs
 
@@ -210,7 +212,7 @@ try {
     writeFileSync(join(root, ".cotal", "delivery.pid.identity"), formatRecord({ pid: target.pid!, token }));
     await stopDelivery();
     await wait(200);
-    check("C1 a MATCHING pin IS torn down (SIGTERM, death confirmed, record cleared)", target.child.exitCode === 0, { exitCode: target.child.exitCode });
+    check("C1 a MATCHING pin IS torn down (cleanup, death confirmed, record cleared)", target.child.exitCode === 0, { exitCode: target.child.exitCode });
     check("C2 a proven-death teardown clears the pidfile AND the pin", !existsSync(join(root, ".cotal", "delivery.pid")) && !existsSync(join(root, ".cotal", "delivery.pid.identity")));
   }
 
@@ -405,11 +407,24 @@ try {
     const stat = lstatSync(marker);
     const frame = { version: 1, target: formatRecord(target), token: capability.token,
       stopper: formatRecord({ pid: process.pid, token: defaultStartToken(process.pid)! }), reservation: `${stat.dev}:${stat.ino}` };
+    const consuming = (): boolean => readdirSync(join(root, ".cotal", "local-stop")).some((name) => name.startsWith(`${basename(prefix)}.request.`) && name.endsWith(".consuming"));
     const rejected = async (name: string, data: string): Promise<void> => {
       writeFileSync(`${prefix}.request`, data);
       const until = Date.now() + 20_000;
-      while (Date.now() < until && (existsSync(`${prefix}.request`) || readdirSync(join(root, ".cotal", "local-stop")).some((name) => name.endsWith(".consuming")))) await wait(50);
-      check(name, child.exitCode === null && !existsSync(`${prefix}.request`) && !readdirSync(join(root, ".cotal", "local-stop")).some((name) => name.endsWith(".consuming")));
+      while (Date.now() < until && (existsSync(`${prefix}.request`) || consuming())) await wait(50);
+      // A reply proves the child's event loop got past the request callback; an exit cannot race a
+      // snapshot of exitCode and make an accepted request look refused.
+      const responsive = await new Promise<boolean>((resolve) => {
+        if (!child.connected) { resolve(false); return; }
+        const done = (alive: boolean): void => { clearTimeout(timer); child.off("message", onMessage); child.off("exit", onExit); resolve(alive); };
+        const onMessage = (message: unknown): void => { if (message === "alive") done(true); };
+        const onExit = (): void => done(false);
+        const timer = setTimeout(() => done(false), 5000);
+        child.on("message", onMessage); child.once("exit", onExit);
+        try { child.send("probe", (error) => { if (error) done(false); }); }
+        catch { done(false); }
+      });
+      check(name, responsive && child.exitCode === null && !existsSync(`${prefix}.request`) && !consuming());
     };
     await rejected("H1 a local stop without its private nonce cannot invoke cleanup", JSON.stringify({ ...frame, token: "0".repeat(64) }));
     await rejected("H2 a local stop for another process generation cannot invoke cleanup", JSON.stringify({ ...frame, target: `${frame.target}other` }));
@@ -426,12 +441,30 @@ try {
     cleanup(true);
     check("H6 an authenticated local stop reaches the real cleanup handler", child.exitCode === 0);
     check("H7 a predecessor stop leaves a successor capability intact", existsSync(successor) && !existsSync(`${prefix}.ready`));
+    check("H8 a synchronous cleanup consumes its one-shot request before exiting", !consuming());
     rmSync(marker);
   }
+} catch (error) {
+  suiteFailed = true;
+  throw error;
 } finally {
   for (const s of strays) reap(s);
+  const exited = await Promise.all(strays.map((child) => new Promise<boolean>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) { resolve(true); return; }
+    const timer = setTimeout(() => resolve(false), 5000);
+    child.once("exit", () => { clearTimeout(timer); resolve(true); });
+  })));
   process.chdir(prevCwd);
-  rmSync(root, { recursive: true, force: true });
+  if (exited.some((gone) => !gone)) {
+    console.error(`! test state retained at ${root}: a child exit could not be confirmed`);
+    if (!suiteFailed) throw new Error("test cleanup could not confirm every child exit");
+  } else {
+    try { rmSync(root, { recursive: true, force: true }); }
+    catch (error) {
+      if (!suiteFailed) throw error;
+      console.error(`! test state retained at ${root}: cleanup ${(error as NodeJS.ErrnoException).code}; the original suite failure is preserved`);
+    }
+  }
 }
 
 console.log(`\nPID IDENTITY TESTS PASSED ✅  (${pass} checks)`);

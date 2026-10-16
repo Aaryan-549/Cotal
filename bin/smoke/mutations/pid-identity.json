@@ -225,6 +225,15 @@
       "expectRed": "H5 oversized local stop metadata cannot invoke cleanup",
       "cell": "H5 oversized local stop metadata cannot invoke cleanup",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M23 local cleanup exits before consuming its request",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "      verified = true;\n",
+      "replace": "      onStop();\n      verified = true;\n",
+      "expectRed": "H8 a synchronous cleanup consumes its one-shot request before exiting",
+      "cell": "H8 a synchronous cleanup consumes its one-shot request before exiting",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     }
   ]
 }

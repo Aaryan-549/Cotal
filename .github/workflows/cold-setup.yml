@@ -39,8 +39,11 @@ jobs:
           path: packages/seat/build/Release/linux-${{ matrix.arch }}/peercred.node
           if-no-files-found: error
 
+  workspace-native:
+    uses: ./.github/workflows/workspace-native.yml
+
   candidate:
-    needs: native
+    needs: [native, workspace-native]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -69,6 +72,19 @@ jobs:
         env:
           SEAT_NATIVE_X64: ${{ runner.temp }}/cold-native-x64/peercred.node
           SEAT_NATIVE_ARM64: ${{ runner.temp }}/cold-native-arm64/peercred.node
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-x64
+          path: ${{ runner.temp }}/workspace-native-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-arm64
+          path: ${{ runner.temp }}/workspace-native-arm64
+      - name: Assemble source-matched Windows creation identity bindings
+        run: node scripts/workspace-assemble-natives.mjs
+        env:
+          WORKSPACE_NATIVE_X64: ${{ runner.temp }}/workspace-native-x64
+          WORKSPACE_NATIVE_ARM64: ${{ runner.temp }}/workspace-native-arm64
       - name: Pack every public candidate package
         run: node scripts/pack-cold-candidate.mjs cold-candidate
       - uses: actions/upload-artifact@v4
@@ -109,7 +125,7 @@ jobs:
 
   cold-ok:
     if: always()
-    needs: [native, candidate, lifecycle]
+    needs: [native, workspace-native, candidate, lifecycle]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -126,6 +142,7 @@ jobs:
       - name: Require every cold setup
         env:
           NATIVE: ${{ needs.native.result }}
+          WORKSPACE_NATIVE: ${{ needs.workspace-native.result }}
           CANDIDATE: ${{ needs.candidate.result }}
           LIFECYCLE: ${{ needs.lifecycle.result }}
-        run: test "$NATIVE" = success && test "$CANDIDATE" = success && test "$LIFECYCLE" = success
+        run: test "$NATIVE" = success && test "$WORKSPACE_NATIVE" = success && test "$CANDIDATE" = success && test "$LIFECYCLE" = success
