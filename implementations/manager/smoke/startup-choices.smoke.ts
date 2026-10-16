@@ -2,7 +2,7 @@
  * This checks final confirmation/timeout custody; claude-workspace-trust covers real native trust. */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ import { LegacyPtyRuntime } from "../src/runtime/pty.js";
 import { CustodialPtyRuntime } from "../src/runtime/custodial-pty.js";
 import { TmuxRuntime } from "../../../extensions/tmux/src/runtime.js";
 import { available as tmuxAvailable } from "../../../extensions/tmux/src/driver.js";
-import { CLAUDE_WORKSPACE_TRUST_REPLIES } from "../../../extensions/connector-claude-code/src/trust.js";
+import { CLAUDE_READY_TEXTS, CLAUDE_WORKSPACE_TRUST_REPLIES } from "../../../extensions/connector-claude-code/src/trust.js";
 
 const root = mkdtempSync(join(tmpdir(), "cotal-startup-choices-"));
 const session = `choices-${process.pid}`;
@@ -20,7 +20,10 @@ const handles: AgentHandle[] = [];
 let ownsTmux = false;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const rows = (path: string): { key: string; phase: string }[] => {
-  try { return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((r) => JSON.parse(r)); }
+  try {
+    assert.ok(statSync(path).size <= 64 * 1024, "startup fixture log stays within 64KiB (no terminal reply loop)");
+    return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((r) => JSON.parse(r));
+  }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
 };
 const failures: string[] = [];
@@ -30,7 +33,7 @@ try {
   else console.log(`SKIP custody: Linux-only seat transport (host: ${process.platform})`);
   if (tmuxAvailable()) runtimes.push(["tmux", new TmuxRuntime(session)]);
   else console.log("SKIP tmux: tmux is not installed; pane startup is not exercised");
-  const cases = runtimes.flatMap(([runtimeName, runtime]) => ["normal", "trusted", "missing"].map((mode) => {
+  const cases = runtimes.flatMap(([runtimeName, runtime]) => ["normal", "trusted", "missing", "ready", "ready-trusted", "unknown"].map((mode) => {
     if (runtimeName === "tmux" && !ownsTmux) {
       assert.throws(() => execFileSync("tmux", ["has-session", "-t", session], { stdio: "ignore" }));
       ownsTmux = true;
@@ -40,6 +43,7 @@ try {
     const handle = runtime.spawn(name, {
       command: process.execPath, args: [fixture, path, mode], env: { PATH: process.env.PATH! },
       confirm: "WARNING: Loading development channels", confirmBefore: CLAUDE_WORKSPACE_TRUST_REPLIES,
+      confirmReady: CLAUDE_READY_TEXTS,
     }, root);
     handles.push(handle);
     return { name, path, handle, mode };
@@ -53,6 +57,13 @@ try {
       if (test.mode === "missing") {
         assert.equal(test.handle.status(), "exited", `${test.name}: absent final prompt fails bounded`);
         assert.deepEqual(observed, [{ key: "Down", phase: "trust" }, { key: "Enter", phase: "trust" }], `${test.name}: no tool-approval key after trust`);
+      } else if (test.mode === "unknown") {
+        assert.equal(test.handle.status(), "exited", `${test.name}: an unknown dialog fails bounded`);
+        assert.deepEqual(observed, [], `${test.name}: an unknown dialog gets no key`);
+      } else if (test.mode.startsWith("ready")) {
+        assert.equal(test.handle.status(), "running", `${test.name}: the ready screen disarms the deadline`);
+        assert.deepEqual(observed, test.mode === "ready" ? [{ key: "Down", phase: "trust" }, { key: "Enter", phase: "trust" }] : [],
+          `${test.name}: the ready screen gets no key`);
       } else {
         assert.equal(test.handle.status(), "running", `${test.name}: final confirmation disarms the deadline`);
         assert.deepEqual(observed, test.mode === "trusted" ? [{ key: "Enter", phase: "final" }] : [

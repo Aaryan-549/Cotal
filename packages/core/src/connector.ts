@@ -156,9 +156,15 @@ export interface LaunchSpec {
    *  text with cursor moves, not spaces); a text with nothing left after stripping, `""` included,
    *  is refused before the seat starts. */
   confirm?: string;
-  /** Optional native startup choices, answered in order before confirm. Only the startup watch
-   * may answer them; ordinary tool permissions remain the harness's responsibility. */
+  /** Optional native startup choices, answered in order before confirm. A choice marked
+   * `optional` may be passed over for the next one. Only the startup watch may answer them;
+   * ordinary tool permissions remain the harness's responsibility. */
   confirmBefore?: readonly StartupReply[];
+  /** Optional texts that show the harness reached its input screen without showing confirm, for a
+   * harness that shows that prompt only in some setups. Each is matched within one visible line,
+   * normalized like confirm. Seen on two consecutive screen reads, it ends the startup watch with
+   * no key. Requires confirm. */
+  confirmReady?: readonly string[];
   /** This agent's local control endpoint — the OS path its lifecycle hooks connect to (passed in
    *  the child env as `COTAL_CONTROL_SOCKET`/`COTAL_CONTROL_TOKEN`), plus the first-frame `token`
    *  that authenticates it. The connector mints it in `buildLaunch`; the manager keeps it IN MEMORY
