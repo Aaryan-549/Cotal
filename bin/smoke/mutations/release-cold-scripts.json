@@ -1,6 +1,6 @@
 {
   "suite": ["scripts/release-cold-publish.smoke.mjs"],
-  "guard": "The packer invokes prepublish guards before packing, and the publisher enforces secure preflight and disables publication-time lifecycle hooks",
+  "guard": "The packer invokes prepublish guards before packing and inspects archives without tar subprocesses; the publisher enforces secure preflight and disables publication-time lifecycle hooks",
   "command": "node scripts/release-cold-publish.smoke.mjs",
   "mutations": [
     {
@@ -10,6 +10,22 @@
       "replace": "\"run\", \"build\"",
       "expectRed": "FAIL cold candidate runs prepublish guards before packing",
       "cell": "cold candidate runs prepublish guards before packing"
+    },
+    {
+      "name": "Cold candidate reintroduces a tar inspection subprocess",
+      "file": "scripts/pack-cold-candidate.mjs",
+      "find": "    const files = {};",
+      "replace": "    const files = {};\n    exec(\"tar\", [\"-tf\", archive]);",
+      "expectRed": "FAIL cold candidate inspects archives without tar subprocesses",
+      "cell": "cold candidate inspects archives without tar subprocesses"
+    },
+    {
+      "name": "Cold candidate accepts repeated archive entries",
+      "file": "scripts/pack-cold-candidate.mjs",
+      "find": "      if (Object.hasOwn(files, name)) throw new Error(`cold candidate has a repeated archive entry: ${entry.path}`);\n",
+      "replace": "",
+      "expectRed": "FAIL cold candidate refuses repeated archive entries",
+      "cell": "cold candidate refuses repeated archive entries"
     },
     {
       "name": "Archive publisher bypasses the secure preflight",
