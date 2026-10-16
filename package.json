@@ -825,6 +825,7 @@
     "micromark-util-decode-string": "^2.0.1",
     "micromark-util-sanitize-uri": "^2.0.1",
     "parse5": "^7.3.0",
+    "tar": "7.5.22",
     "ts-json-schema-generator": "^2.9.0",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",

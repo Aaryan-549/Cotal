@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { list as listTar } from "tar";
 import { closureFromConfig } from "./verify-publish-closure.mjs";
 import { isMainEntry } from "./main-entry.mjs";
 
@@ -27,12 +28,27 @@ export function packColdCandidate({
     const added = readdirSync(output).filter((name) => !before.has(name) && name.endsWith(".tgz"));
     if (added.length !== 1) throw new Error(`cold candidate expected one tarball for ${row.name}`);
     const archive = join(output, added[0]);
-    const info = JSON.parse(exec("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }));
-    if (info.name !== row.name || info.version !== row.version) throw new Error("cold candidate package identity mismatch");
-    const entries = exec("tar", ["-tf", archive], { encoding: "utf8" }).split("\n").filter((name) => name.startsWith("package/") && !name.endsWith("/"));
-    if (!entries.some((name) => name.startsWith("package/dist/"))) throw new Error(`cold candidate ${row.name} has no built distribution`);
+    let info;
     const files = {};
-    for (const entry of entries) files[entry.slice("package/".length)] = sha(exec("tar", ["-xOf", archive, entry], { maxBuffer: 16 * 1024 * 1024 }));
+    listTar({ file: archive, sync: true, strict: true, onReadEntry(entry) {
+      if (!entry.path.startsWith("package/") || entry.type === "Directory") { entry.resume(); return; }
+      if (entry.type !== "File") throw new Error(`cold candidate has an unsupported archive entry: ${entry.path}`);
+      const name = entry.path.slice("package/".length);
+      if (Object.hasOwn(files, name)) throw new Error(`cold candidate has a repeated archive entry: ${entry.path}`);
+      const hash = createHash("sha256"), chunks = name === "package.json" ? [] : undefined;
+      let size = 0;
+      entry.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > (chunks ? 1024 * 1024 : 16 * 1024 * 1024)) throw new Error(`cold candidate archive entry exceeds its inspection limit: ${entry.path}`);
+        hash.update(chunk); chunks?.push(chunk);
+      });
+      entry.on("end", () => {
+        files[name] = hash.digest("hex");
+        if (chunks) info = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      });
+    } });
+    if (info?.name !== row.name || info.version !== row.version) throw new Error("cold candidate package identity mismatch");
+    if (!Object.keys(files).some((name) => name.startsWith("dist/"))) throw new Error(`cold candidate ${row.name} has no built distribution`);
     manifest.packages.push({ name: row.name, version: row.version, archive: basename(archive), sha256: sha(readFileSync(archive)), files, sourceManifest: readFileSync(join(row.path, "package.json"), "utf8") });
   }
   writeFileSync(join(output, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", { flag: "wx" });

@@ -138,8 +138,9 @@ shutdown cleanup and fresh process generations after restart. Missing or failed 
 publication. Logs and source-bound receipts are retained for each platform.
 
 Before packing, the candidate runs every public package's `prepublishOnly` guard in dependency
-order. Packing also runs the package's pack hooks. Native binaries are assembled before these
-steps. Every native receipt names the hash of the candidate manifest, whose entries hash the
+order. Packing also runs the package's pack hooks. The packer hashes archive entries in one
+read-only stream without extracting files. Native binaries are assembled before these steps.
+Every native receipt names the hash of the candidate manifest, whose entries hash the
 archives. Publication downloads that immutable candidate and those receipts from the same run,
 verifies the whole set, then publishes the archives without rebuilding or rerunning package
 scripts. The publication process does not assemble another native binary set.
