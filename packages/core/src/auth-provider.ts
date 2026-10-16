@@ -24,6 +24,14 @@ import type {
   RemoteRunAttemptResult,
 } from "./remote-manager-authority.js";
 
+/** A fresh agent grant refused an occupied actor without replacing its authority. */
+export class AgentGrantConflictError extends Error {
+  constructor(actor: string) {
+    super(`actor "${actor}" already has a grant; no grant was replaced`);
+    this.name = "AgentGrantConflictError";
+  }
+}
+
 /**
  * The one extension kind an identity/auth implementation registers so a composition root can turn
  * on USER-MODE auth (the human-owner identity plane over per-agent NATS identity) WITHOUT importing
@@ -255,7 +263,7 @@ export interface AuthProvider extends Extension {
    * rotates its secret. MUST fail loud when the space has no user-auth material in `store`/`dir`.
    */
   grantAgent(opts: {
-    /** A genuinely new foreground launch refuses an existing row rather than rotating it. */
+    /** Refuse an existing row with AgentGrantConflictError rather than rotating it. */
     fresh?: boolean;
     store: SecretStore;
     dir: string;

@@ -5,6 +5,7 @@ import { hostname } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import {
   agentFilePath,
+  AgentGrantConflictError,
   connectorServers,
   spawnEnvAllow,
   deprovisionAgent,
@@ -382,6 +383,26 @@ async function uniqueMeshName(
   }
 }
 
+
+/** Only an occupied actor is retryable; authorization and provisioning failures stay failures. */
+class ForegroundActorCollision extends Error {}
+
+async function provisionFreshForeground<T>(
+  requested: string,
+  autoName: boolean,
+  provision: (name: string) => Promise<T>,
+): Promise<{ name: string; provisioned: T }> {
+  const occupied = new Set<string>();
+  for (;;) {
+    const name = firstFreeName(requested, (candidate) => occupied.has(candidate));
+    try {
+      return { name, provisioned: await provision(name) };
+    } catch (e) {
+      if (!autoName || !(e instanceof ForegroundActorCollision || e instanceof AgentGrantConflictError)) throw e;
+      occupied.add(name);
+    }
+  }
+}
 
 /** `cotal spawn`'s full grammar: target + the shared launch bundle + the two spawn-only modes
  *  (`--detach` = manager-run; `-f` = manifest deploy). Declared `as const` so the values cast
@@ -930,22 +951,9 @@ export async function spawn(args: ParsedArgs): Promise<void> {
       process.exit(1);
     });
 
-  // A second `cotal spawn` of the same agent would otherwise join under a duplicate mesh identity:
-  // auto-number the name past anyone already present (best-effort — this path bypasses the manager's
-  // race-free reservation; see uniqueMeshName). Everything below (creds path, launch) uses `name`.
-  // USER mesh: the advisory presence read has no credential to ride (no static mint — U10), so the
-  // requested name stands; a same-name respawn ROTATES that actor's grant (upsert), which kills the
-  // previous holder's next bearer refresh with the "secret is stale — respawn" health state rather
-  // than aliasing it silently.
-  const name = target.mode === "user" ? requested : await uniqueMeshName(requested, { space, server, auth });
-  if (name !== requested)
-    console.error(`"${requested}" is already on the mesh - spawning as ${name} instead`);
-
-  // When the target was auto-resolved (one mesh up, or the `current` default), say which mesh we
-  // picked — it isn't obvious from the cwd. An explicit --space/--server or a local project is
-  // self-evident, so stay quiet there.
-  if (target.source === "registry" || target.source === "current")
-    console.error(c.dim(`→ joining mesh ${space} (${server}) as ${name}`));
+  // User mode allocates during guarded provisioning below, without a static operator credential.
+  // Static/open mode keeps its advisory roster check. Every launch field uses the allocated name.
+  let name = target.mode === "user" ? requested : await uniqueMeshName(requested, { space, server, auth });
 
   const agentType = resolveAgentType({ flag: values.agent, pin: def.agent });
   // Materialize the connector HERE, after the authoritative persona load (#869): the harness choice
@@ -1109,7 +1117,10 @@ export async function spawn(args: ParsedArgs): Promise<void> {
     if (remote.material.allowPublish) allowPublish = remote.material.allowPublish;
     lifecycleUid = remote.material.lifecycleUid;
   } else if (remoteProvisioningUrl) {
-    const remote = await provisionRemoteUserForeground(target, name, { provisioningUrl: remoteProvisioningUrl });
+    const selected = await provisionFreshForeground(requested, values.name === undefined, (candidate) =>
+      provisionRemoteUserForeground(target, candidate, { provisioningUrl: remoteProvisioningUrl }));
+    name = selected.name;
+    const remote = selected.provisioned;
     userAuth = remote.userAuth;
     userCleanup = remote.cleanup;
     remoteUserAuth = true;
@@ -1130,16 +1141,19 @@ export async function spawn(args: ParsedArgs): Promise<void> {
     // preflight all happen BEFORE launch, so the spawned agent is never the first to discover a
     // dead auth plane.
     let eventGrant: string | undefined;
-    ({ userAuth, cleanup: userCleanup, eventChannel: eventGrant } = await provisionUserForeground(target, name, ref, {
-      subscribe,
-      allowSubscribe,
-      allowPublish,
-      role,
-      capabilities: def.capabilities,
-      lifecycleUid,
-      liveOnly: values["live-only"] as boolean | undefined,
-      ...(launchEvents ? { eventChannel: connector.eventChannel! } : {}),
-    }));
+    const selected = await provisionFreshForeground(requested, values.name === undefined, (candidate) =>
+      provisionUserForeground(target, candidate, ref, {
+        subscribe,
+        allowSubscribe,
+        allowPublish,
+        role,
+        capabilities: def.capabilities,
+        lifecycleUid,
+        liveOnly: values["live-only"] as boolean | undefined,
+        ...(launchEvents ? { eventChannel: connector.eventChannel! } : {}),
+      }));
+    name = selected.name;
+    ({ userAuth, cleanup: userCleanup, eventChannel: eventGrant } = selected.provisioned);
     // The launch's post-set is forwarded to the session as COTAL_ALLOW_PUBLISH, so it has to carry
     // whatever was actually minted. Letting the two diverge is how an agent ends up holding a right
     // its own runtime does not know it has.
@@ -1212,6 +1226,10 @@ export async function spawn(args: ParsedArgs): Promise<void> {
   let spec: LaunchSpec;
   let artifacts: string[] | undefined;
   try {
+    if (name !== requested)
+      console.error(`"${requested}" is already on the mesh - spawning as ${name} instead`);
+    if (target.source === "registry" || target.source === "current")
+      console.error(c.dim(`→ joining mesh ${space} (${server}) as ${name}`));
     spec = connector.buildLaunch({
       space,
       name,
@@ -1327,13 +1345,12 @@ interface RemoteAgentMaterial {
 }
 
 /** Validate the provisioning response. Returns the material, or the refusal sentence. */
-function checkRemoteAgentMaterial(v: unknown, actor: string): { ok: true; material: RemoteAgentMaterial } | { ok: false; message: string } {
+function checkRemoteAgentMaterial(v: unknown, actor: string): { ok: true; material: RemoteAgentMaterial } | { ok: false; message: string; exists?: true } {
   const o = v as Partial<RemoteAgentMaterial> & { exists?: boolean };
   const bad = (m: string): { ok: false; message: string } => ({ ok: false, message: m });
   if (o === null || typeof o !== "object") return bad("the mesh's agent-provisioning endpoint did not answer with a JSON object");
-  // An idempotent "already exists" answer carries no material by design; it is not an error the
-  // client can repair by retrying, so it gets its own sentence naming the flag that rotates.
-  if (o.exists === true) return bad(`agent "${actor}" already exists on this mesh and its credentials were not reissued - spawn it under a different name, or ask the mesh operator to reissue it`);
+  // An occupied actor carries no material. Only an implicit new launch may try a different actor.
+  if (o.exists === true) return { ok: false, exists: true, message: `agent "${actor}" already exists on this mesh and its credentials were not reissued - spawn it under a different name, or ask the mesh operator to reissue it` };
   const str = (k: keyof RemoteAgentMaterial): string | undefined => (typeof o[k] === "string" && o[k] ? (o[k] as string) : undefined);
   for (const k of ["actor", "owner", "lifecycleUid", "actorToken", "sentinelCreds"] as const)
     if (!str(k)) return bad(`the mesh's agent-provisioning endpoint returned no ${k} - it cannot provision agents for this mesh`);
@@ -1453,7 +1470,7 @@ async function provisionRemoteUserForeground(
   let body: unknown;
   const materialClaim = acquireLock(`${paths.actorToken}.launch.lock`, {
     waitMs: 0,
-    onTimeout: () => new Error(`foreground actor material for "${name}" is already held; preserve its session and choose a distinct actor for a new launch`),
+    onTimeout: () => new ForegroundActorCollision(`foreground actor material for "${name}" is already held; preserve its session and choose a distinct actor for a new launch`),
   });
   if ("body" in source) {
     body = source.body;
@@ -1468,11 +1485,16 @@ async function provisionRemoteUserForeground(
     try {
       body = await provider.postAgentProvisioning({ url: source.provisioningUrl, idpUrl, actor: name });
     } catch (e) {
-      return fail((e as Error).message);
+      materialClaim.release();
+      throw e;
     }
   }
   const checked = checkRemoteAgentMaterial(body, name);
-  if (!checked.ok) return fail(refusals?.bundle ?? checked.message);
+  if (!checked.ok) {
+    materialClaim.release();
+    if (checked.exists && "provisioningUrl" in source) throw new ForegroundActorCollision(checked.message);
+    return fail(refusals?.bundle ?? checked.message);
+  }
   const material = checked.material;
   const { actorToken: tokenPath, sentinelCreds: sentinelPath, health: healthPath } = paths;
   if (inspectLock(localConsumerClaimPath(target.server, space, material.owner, name, material.lifecycleUid)).state === "active") {
@@ -1533,7 +1555,7 @@ async function provisionRemoteUserForeground(
 /** Foreground USER-MODE onboarding — the CLI-side twin of the manager's user spawn provisioning:
  *  owner = the logged-in operator (offline, from the login cache + local user-auth material);
  *  principal-keyed durables on an ephemeral provisioner (LIVE-ONLY, like static foreground);
- *  ledger grant with a fresh per-agent secret (upsert rotates); 0600 secret/sentinel files; and a
+ *  fresh ledger grant that refuses an occupied actor; 0600 secret/sentinel files; and a
  *  one-shot bearer preflight whose operator-exact sentence is the refusal. Exits on any failure —
  *  the agent process is never launched into a broken auth chain. */
 async function provisionUserForeground(
@@ -1571,13 +1593,13 @@ async function provisionUserForeground(
   const { actorToken: tokenPath, sentinelCreds: sentinelPath, health: healthPath } = paths;
   const materialClaim = acquireLock(`${tokenPath}.launch.lock`, {
     waitMs: 0,
-    onTimeout: () => new Error(`foreground actor material for "${name}" is already held; preserve its session and choose a distinct actor for a new launch`),
+    onTimeout: () => new ForegroundActorCollision(`foreground actor material for "${name}" is already held; preserve its session and choose a distinct actor for a new launch`),
   });
   // An existing row is not this new launch's property. In particular, a dead launcher may
   // leave its consuming child alive. Never overwrite the row to discover occupancy later.
   if (await provider.actorScope({ dir, owner, actor: name }) !== undefined) {
     materialClaim.release();
-    return fail(`actor "${name}" already has a grant; preserve its session and choose a distinct actor for a new launch`);
+    throw new ForegroundActorCollision(`actor "${name}" already has a grant; preserve its session and choose a distinct actor for a new launch`);
   }
   let ownedToken: string | undefined;
   // Revoke the row, shred the secret material, and retire the broker footprint the durable
@@ -1684,6 +1706,7 @@ async function provisionUserForeground(
     // orphaned durables. What the teardown could not remove joins the refusal after its cause.
     const failed = await teardown();
     materialClaim.release();
+    if (e instanceof AgentGrantConflictError && ownedToken === undefined && failed.length === 0) throw e;
     const leftover = failed.length ? `; cleanup failed: ${describeCleanupFailures(failed)}` : "";
     return fail(`agent auth preflight failed for "${name}": ${rejectionText(e)}${leftover}`);
   }

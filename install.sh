@@ -937,6 +937,21 @@ setup_path() {
   export PATH
 }
 
+# The child shell can inspect PATH, but cannot clear its parent's command cache or aliases.
+report_path_selection() {
+  _selected=$(command -v cotal 2>/dev/null || true)
+  _selected_target=""
+  case "$_selected" in
+    /*) _selected_target=$(resolved_target "$_selected") || _selected_target="" ;;
+  esac
+  _installed_target=$(resolved_target "$BIN_DIR/cotal") || _installed_target=""
+  if [ -z "$_selected_target" ] || [ "$_selected_target" != "$_installed_target" ]; then
+    warn_line "Your PATH does not select the Cotal just installed."
+    dim_line "Use $(shquote "$BIN_DIR/cotal") instead of plain cotal."
+  fi
+  dim_line "Check \`type -a cotal\` in your shell; this installer cannot change its cached commands, aliases or functions."
+}
+
 # ---------------------------------------------------------------------------------------
 # What is already on this machine
 #
@@ -1013,26 +1028,27 @@ summary() {
 }
 
 next_steps() {
+  _cotal=$(shquote "$BIN_DIR/cotal")
   blank
   head_line "Next"
   case "$PATH_STATE" in
     added:*)
       _rc=${PATH_STATE#added:}
       printf '    %s%s%s   %sreload your shell, once%s\n' "$C_BRAND" "exec $(basename "${SHELL:-sh}")" "$C_OFF" "$C_DIM" "$C_OFF"
-      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "cotal setup" "$C_OFF" "$C_DIM" "get your machine ready" "$C_OFF"
+      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "$_cotal setup" "$C_OFF" "$C_DIM" "get your machine ready" "$C_OFF"
       blank
       dim_line "PATH updated in $(tildify "$_rc")"
       ;;
     manual)
       printf '    %s%s%s\n' "$C_BRAND" "export PATH=\"$BIN_DIR:\$PATH\"" "$C_OFF"
-      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "cotal setup" "$C_OFF" "$C_DIM" "get your machine ready" "$C_OFF"
+      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "$_cotal setup" "$C_OFF" "$C_DIM" "get your machine ready" "$C_OFF"
       blank
       dim_line "Add that export to your shell rc to make it permanent."
       ;;
     *)
-      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "cotal setup" "$C_OFF" "$C_DIM" "get your machine ready" "$C_OFF"
-      printf '    %s%s%s     %s%s%s\n' "$C_BRAND" "cotal up --detach" "$C_OFF" "$C_DIM" "start your mesh" "$C_OFF"
-      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "cotal spawn" "$C_OFF" "$C_DIM" "put an agent on it" "$C_OFF"
+      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "$_cotal setup" "$C_OFF" "$C_DIM" "get your machine ready" "$C_OFF"
+      printf '    %s%s%s     %s%s%s\n' "$C_BRAND" "$_cotal up --detach" "$C_OFF" "$C_DIM" "start your mesh" "$C_OFF"
+      printf '    %s%s%s          %s%s%s\n' "$C_BRAND" "$_cotal spawn" "$C_OFF" "$C_DIM" "put an agent on it" "$C_OFF"
       ;;
   esac
   blank
@@ -1051,7 +1067,7 @@ hand_off_to_setup() {
   [ "$TTY" = 1 ] || return 1
 
   blank
-  dim_line "Starting guided setup. Ctrl-C to stop; run \`cotal setup\` whenever you like."
+  dim_line "Starting guided setup. Ctrl-C to stop; run $(shquote "$BIN_DIR/cotal") setup whenever you like."
   blank
   "$BIN_DIR/cotal" setup </dev/tty || return 1
   return 0
@@ -1172,6 +1188,7 @@ main() {
     manual) warn_line "$(tildify "$BIN_DIR") is not on your PATH yet" ;;
   esac
 
+  report_path_selection
   ELAPSED=$(($(date +%s) - _t0))
 
   summary
