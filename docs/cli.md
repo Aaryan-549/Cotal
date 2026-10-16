@@ -23,7 +23,9 @@ generates its own `--help`, usage, and shell completion from its declared flags.
 In a dev clone, `pnpm cotal <command>` runs `bin/cotal.ts` through `tsx`, but `bin/` loads the other
 packages from their built `dist/`. Run `pnpm build` after `pnpm install`, and again after you edit a
 package, or the command fails with `ERR_MODULE_NOT_FOUND` for `@cotal-ai/cli/dist/index.js` or runs
-the old code.
+the old code. A Windows source build needs the matching MSVC Developer Command Prompt to compile
+its first-party process identity binding. Published packages already contain the x64 and arm64
+binaries and need no compiler or native download.
 
 Commands that run the automatic connector seed, such as `status`, then stop when the
 operator-global seed store is not current for the checkout's version, which includes a fresh config
@@ -431,10 +433,10 @@ extension components, and the manager, delivery and auth-service stops, applies 
 that names a different start means the pid was reused, so teardown refuses and preserves it. A torn
 or unreadable pin also refuses. macOS start tokens keep their spaces, including the padded day,
 in both the identity pin and the one-shot shutdown intent. A single record cannot span lines.
-On Windows, the reader uses .NET `Process.StartTime` through PowerShell and converts it to UTC
-FILETIME. It does not load management cmdlets during a cold launch. The first invocation allows ten
-seconds. A timeout triggers one immediate retry limited to five seconds. Other failures and a second
-timeout leave identity unverified; an unreadable pin still refuses teardown.
+On Windows, the reader calls `GetProcessTimes` through a bundled Node-API binding for x64 or
+arm64. It requests limited process-query access and preserves the creation FILETIME as a decimal
+string. It launches no subprocess. Access denial leaves identity unverified; an unreadable pin
+still refuses teardown. A missing or damaged binding is an installation error and has no fallback.
 
 The pidfile and its pin are published by renames, and the pidfile rename is the commit point. Just
 before it, the pin holds two lines: the old process's and the new one's. A launcher that dies

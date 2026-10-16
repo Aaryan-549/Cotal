@@ -40,9 +40,15 @@ concurrency:
   queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
 
 jobs:
+  workspace-native:
+    uses: ./.github/workflows/workspace-native.yml
+    with:
+      architectures: '["x64"]'
+
   # `required` lane, the one windows-ok fans in — Windows-specific + broker-free, so a red is a real
   # Windows regression.
   required:
+    needs: workspace-native
     name: Windows / required
     timeout-minutes: 25
     runs-on: windows-latest
@@ -53,6 +59,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-x64
+          path: packages/workspace/build/Release/win32-x64
       # Default pnpm install keeps optionalDependencies (@lydell/node-pty ConPTY + the
       # @eplightning/nats-server-win32-* fallback binaries are per-platform optional deps).
       - name: Install dependencies
@@ -79,6 +89,7 @@ jobs:
   # NON-BLOCKING lane — the protocol/security suite, sharded. Each shard spins its own nats-server,
   # and Windows broker teardown is what makes it flaky (see the lane note at the top).
   smoke:
+    needs: workspace-native
     name: Windows / smoke (shard ${{ matrix.shard }}/4 — non-blocking)
     timeout-minutes: 25
     runs-on: windows-latest
@@ -93,6 +104,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-x64
+          path: packages/workspace/build/Release/win32-x64
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Cache nats-server
@@ -133,6 +148,7 @@ jobs:
   # SOAK lane — non-blocking. The live-broker smokes are split into independent steps (each
   # continue-on-error) so one's cleanup failure can't mask the next.
   soak:
+    needs: workspace-native
     name: Windows / smoke (soak — non-blocking)
     timeout-minutes: 30
     runs-on: windows-latest
@@ -143,6 +159,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-x64
+          path: packages/workspace/build/Release/win32-x64
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Cache nats-server

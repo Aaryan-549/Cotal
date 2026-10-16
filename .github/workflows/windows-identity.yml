@@ -5,20 +5,35 @@ on:
       - packages/workspace/src/pid.ts
       - packages/workspace/src/local-stop.ts
       - implementations/cli/src/lib/local-process-stop.ts
+      - packages/workspace/src/win32-process.ts
+      - packages/workspace/native/**
+      - packages/workspace/scripts/**
+      - packages/workspace/package.json
+      - packages/workspace/smoke/fixtures/win32-denied-process.c
+      - packages/workspace/smoke/fixtures/win32-query-denied.c
+      - .gitattributes
       - packages/workspace/smoke/pid-identity.smoke.ts
       - packages/workspace/smoke/win32-creation-native.smoke.ts
+      - scripts/workspace-assemble-natives.mjs
       - bin/smoke/mutations/pid-identity.json
       - scripts/mutation-proof.mjs
       - scripts/release-cold-environment.mjs
       - scripts/release-cold-environment.d.mts
       - scripts/release-cold-environment.smoke.mjs
+      - .github/workflows/workspace-native.yml
       - .github/workflows/windows-identity.yml
   push:
-    branches: [main]
+    branches: [main, fix/windows-native-creation-binding]
 permissions:
   contents: read
 jobs:
+  build-native:
+    uses: ./.github/workflows/workspace-native.yml
+    with:
+      test_controls: true
+
   native:
+    needs: build-native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -32,6 +47,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: packages/workspace/build/Release/win32-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-tests-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: packages/workspace/build/test/win32-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cotal-ai/core --filter @cotal-ai/workspace build
       - run: pnpm --filter @cotal-ai/workspace typecheck
