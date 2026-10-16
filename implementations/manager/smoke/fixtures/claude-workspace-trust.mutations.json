@@ -104,6 +104,204 @@
       "command": "pnpm --filter @cotal-ai/seat build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
       "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
       "afterRestore": "pnpm --filter @cotal-ai/seat build"
+    },
+    {
+      "name": "core: a ready text ends the watch on its first snapshot",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "      if (!this.#readySeen) { this.#readySeen = true; return undefined; }\n",
+      "replace": "",
+      "expectRed": "core: ready text needs two consecutive snapshots",
+      "cell": "core: ready text needs two consecutive snapshots",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "core: a changed screen keeps the ready observation",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "      if (!ready) { this.#readySeen = false; return undefined; }",
+      "replace": "      if (!ready) return undefined;",
+      "expectRed": "core: ready text needs two consecutive snapshots",
+      "cell": "core: ready text needs two consecutive snapshots",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "core: the ready screen gets Enter",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "      return { done: true };",
+      "replace": "      return { key: \"Enter\", done: true };",
+      "expectRed": "core: real Claude 2.1.301 ready screen in default mode completes with no key",
+      "cell": "core: real Claude 2.1.301 ready screen in default mode completes with no key",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "core: ignore ready texts",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "      const ready = lines.some(",
+      "replace": "      const ready = false && lines.some(",
+      "expectRed": "core: real Claude 2.1.301 ready screen in bypassPermissions mode completes with no key",
+      "cell": "core: real Claude 2.1.301 ready screen in bypassPermissions mode completes with no key",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "core: a ready text in a declared dialog ends the watch",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "\n        && !this.#before.some((reply) => matches(reply.prompt));",
+      "replace": ";",
+      "expectRed": "core: real Claude 2.1.232 trust dialog, then the 2.1.301 ready screen, gets one Enter and completes",
+      "cell": "core: real Claude 2.1.232 trust dialog, then the 2.1.301 ready screen, gets one Enter and completes",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "core: accept an empty ready text",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "      if (!normalized) throw new Error(\"invalid startup ready text\");\n",
+      "replace": "",
+      "expectRed": "core: malformed ready texts are refused",
+      "cell": "core: malformed ready texts are refused",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "seat: a ready text ends the watch on its first snapshot",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "      if (!this.#readySeen) { this.#readySeen = true; return undefined; }\n",
+      "replace": "",
+      "expectRed": "seat: ready text needs two consecutive snapshots",
+      "cell": "seat: ready text needs two consecutive snapshots",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "seat: a changed screen keeps the ready observation",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "      if (!ready) { this.#readySeen = false; return undefined; }",
+      "replace": "      if (!ready) return undefined;",
+      "expectRed": "seat: ready text needs two consecutive snapshots",
+      "cell": "seat: ready text needs two consecutive snapshots",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "seat: the ready screen gets Enter",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "      return { done: true };",
+      "replace": "      return { key: \"Enter\", done: true };",
+      "expectRed": "seat: real Claude 2.1.301 ready screen in default mode completes with no key",
+      "cell": "seat: real Claude 2.1.301 ready screen in default mode completes with no key",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "seat: ignore ready texts",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "      const ready = lines.some(",
+      "replace": "      const ready = false && lines.some(",
+      "expectRed": "seat: real Claude 2.1.301 ready screen in bypassPermissions mode completes with no key",
+      "cell": "seat: real Claude 2.1.301 ready screen in bypassPermissions mode completes with no key",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "seat: a ready text in a declared dialog ends the watch",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "\n        && !this.#before.some((reply) => matches(reply.prompt));",
+      "replace": ";",
+      "expectRed": "seat: real Claude 2.1.232 trust dialog, then the 2.1.301 ready screen, gets one Enter and completes",
+      "cell": "seat: real Claude 2.1.232 trust dialog, then the 2.1.301 ready screen, gets one Enter and completes",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "seat: accept an empty ready text",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "      if (!normalized) throw new Error(\"invalid startup ready text\");\n",
+      "replace": "",
+      "expectRed": "seat: malformed ready texts are refused",
+      "cell": "seat: malformed ready texts are refused",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "core watch: press Enter for an action with no key",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "            } else if (action?.key === \"Enter\") pane.enter();",
+      "replace": "            } else if (action) pane.enter();",
+      "expectRed": "core watch: real Claude 2.1.232 trust, then the 2.1.301 ready screen, gets one Enter and stops",
+      "cell": "core watch: real Claude 2.1.232 trust, then the 2.1.301 ready screen, gets one Enter and stops",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "core watch: drop the ready texts",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "    const sequence = new StartupConfirmSequence(prompt, before, ready);",
+      "replace": "    const sequence = new StartupConfirmSequence(prompt, before);",
+      "expectRed": "core watch: a launch with no startup choices reads the screen and stops on the ready screen",
+      "cell": "core watch: a launch with no startup choices reads the screen and stops on the ready screen",
+      "command": "pnpm --filter @cotal-ai/core... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core... build"
+    },
+    {
+      "name": "seat gate: press a key for an action with no key",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "          if (action?.key) pane.key(action.key);",
+      "replace": "          if (action) pane.key(action.key!);",
+      "expectRed": "seat gate: real Claude 2.1.232 trust, then the 2.1.301 ready screen, gets one Enter and stops",
+      "cell": "seat gate: real Claude 2.1.232 trust, then the 2.1.301 ready screen, gets one Enter and stops",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "seat gate: match a launch with only ready texts in the raw output",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "    this.sequence = before.length || ready.length ? sequence : undefined;",
+      "replace": "    this.sequence = before.length ? sequence : undefined;",
+      "expectRed": "seat gate: a launch with no startup choices reads the screen and stops on the ready screen",
+      "cell": "seat gate: a launch with no startup choices reads the screen and stops on the ready screen",
+      "command": "pnpm --filter @cotal-ai/seat... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat... build"
+    },
+    {
+      "name": "the Claude launch declares no ready texts",
+      "file": "extensions/connector-claude-code/src/extension.ts",
+      "find": "      confirmReady: CLAUDE_READY_TEXTS,\n",
+      "replace": "",
+      "expectRed": "every Claude launch declares its input screen as ready",
+      "cell": "every Claude launch declares its input screen as ready",
+      "command": "pnpm --filter @cotal-ai/connector-claude-code... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/connector-claude-code... build"
+    },
+    {
+      "name": "the Claude ready texts miss the default permission mode",
+      "file": "extensions/connector-claude-code/src/trust.ts",
+      "find": "[\"(shift+tab to cycle)\", \"? for shortcuts\"]",
+      "replace": "[\"(shift+tab to cycle)\"]",
+      "expectRed": "core: real Claude 2.1.301 ready screen in default mode completes with no key",
+      "cell": "core: real Claude 2.1.301 ready screen in default mode completes with no key",
+      "command": "pnpm --filter @cotal-ai/connector-claude-code... build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/connector-claude-code... build"
     }
   ]
 }

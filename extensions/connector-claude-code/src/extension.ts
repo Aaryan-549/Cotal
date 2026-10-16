@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { loadAgentFile, registry, writeLaunchArtifact, type Connector, type LaunchOpts, type LaunchSpec } from "@cotal-ai/core";
 import { aclEnv, connectorLaunchOptions, controlEndpoint, eventChannel, launchArmsEvents, launchEnv, materialEnv, mcpServerEnvKeys } from "@cotal-ai/connector-core";
 import { carriedForkRecord, claudeResumeTranscript, placeCarried, refuseCarriedLaunch } from "./carried.js";
-import { CLAUDE_WORKSPACE_TRUST_REPLIES } from "./trust.js";
+import { CLAUDE_READY_TEXTS, CLAUDE_WORKSPACE_TRUST_REPLIES } from "./trust.js";
 
 /** Name the cotal MCP server is registered under via --mcp-config (see buildLaunch). */
 const MCP_SERVER_NAME = "cotal";
@@ -345,7 +345,9 @@ export const claudeConnector: Connector = {
       // The dev-channels flag shows this one-time gate. Use its unique title rather than the generic
       // "Enter to confirm" footer, which the workspace-trust dialog also renders with a different
       // default action. The runtime presses Enter once when this connector-owned text appears.
+      // Claude skips the gate when channels are off for the session, and opens its input screen.
       confirm: "WARNING: Loading development channels",
+      confirmReady: CLAUDE_READY_TEXTS,
       ...(opts.cwd ? { confirmBefore: CLAUDE_WORKSPACE_TRUST_REPLIES } : {}),
       control,
       ...(opts.carried ? { resumeRecordPath: carriedForkRecord(opts.carried.home) } : {}),

@@ -146,10 +146,15 @@ claude --strict-mcp-config --mcp-config '{"mcpServers":{"cotal":{…}}}' \
   agent, opens no broker connection and binds no control socket.
 - **Hands-free.** The dev-channels flag prints a one-time confirm prompt. The runtime waits for the
   dialog title in normalized terminal text and presses Enter once when it appears, so startup speed
-  does not affect a supervised launch. The PTY runtime reads the child's output, and the tmux, cmux,
-  Orca and Herdr runtimes read the pane's screen. If the declared prompt never appears within 15
-  seconds, the seat ends with a bounded error naming the unmatched prompt instead of hanging
-  silently or answering another dialog. The PTY runtime writes that error to the seat's output and
+  does not affect a supervised launch. Claude skips that prompt when channels are off for the
+  session, for example under a Team or Enterprise organization whose managed settings do not set
+  `channelsEnabled: true`, and opens its input screen instead. The runtime then ends its watch
+  without a key once the input screen's footer shows `(shift+tab to cycle)` or `? for shortcuts` on
+  two screen reads in a row. That seat gets mesh messages through its hooks only, so a message does
+  not wake it while it is idle. The PTY runtimes read the child's screen, and the tmux, cmux, Orca
+  and Herdr runtimes read the pane's screen. If neither the prompt nor the input screen appears
+  within 15 seconds, the seat ends with a bounded error naming the unmatched prompt instead of
+  hanging silently or answering another dialog. The PTY runtime writes that error to the seat's output and
   stops the child as a graceful stop does, so a child that ignores SIGTERM is killed 3 seconds
   later. The other runtimes write the error to the manager's log.
 - **Trusted directory.** An authorized supervised spawn accepts the selected workspace through
@@ -157,7 +162,7 @@ claude --strict-mcp-config --mcp-config '{"mcpServers":{"cotal":{…}}}' \
   shows Yes first and selected, the runtime confirms it with Enter. When No comes first and is
   selected, the runtime moves to Yes and confirms only after seeing Yes selected. It never confirms
   while No is selected, sends each response once, and stops watching after the
-  development-channel confirmation. A changed or unsupported dialog receives no guessed input
+  development-channel confirmation or on the input screen. A changed or unsupported dialog receives no guessed input
   and still fails within the startup bound. Claude saves trust with its own repository and linked
   worktree rules; Cotal does not rewrite the manager's configuration. Accepting trust enables the
   workspace's hooks and settings, which can select a tool permission mode when no launch flag

@@ -33,8 +33,8 @@ export class LegacyPtyRuntime implements Runtime {
     // Built before the child exists, so a prompt that cannot match is a refusal.
     let confirmGate: StartupConfirmGate | undefined;
     try {
-      if (spec.confirmBefore?.length && spec.confirm === undefined) throw new Error("startup choices require a final confirmation prompt");
-      confirmGate = spec.confirm === undefined ? undefined : new StartupConfirmGate(spec.confirm, spec.confirmBefore);
+      if ((spec.confirmBefore?.length || spec.confirmReady?.length) && spec.confirm === undefined) throw new Error("startup choices require a final confirmation prompt");
+      confirmGate = spec.confirm === undefined ? undefined : new StartupConfirmGate(spec.confirm, spec.confirmBefore, spec.confirmReady);
     } catch (err) {
       throw new SpawnRefused((err as Error).message);
     }

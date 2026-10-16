@@ -10,3 +10,9 @@ export const CLAUDE_WORKSPACE_TRUST_REPLIES: readonly StartupReply[] = Object.fr
   Object.freeze({ prompt: "❯ No, exit\nYes, I trust this folder", key: "Down" as const }),
   Object.freeze({ prompt: "No, exit\n❯ Yes, I trust this folder", key: "Enter" as const }),
 ]);
+
+/** Claude's input screen. Claude skips the development-channels warning when channels are off for
+ * the session, for example under a Team or Enterprise org that has not set `channelsEnabled`, or on
+ * a third-party provider. Its footer then shows `(shift+tab to cycle)` in every permission mode but
+ * the default one, which shows `? for shortcuts`. No startup dialog draws either text. */
+export const CLAUDE_READY_TEXTS: readonly string[] = Object.freeze(["(shift+tab to cycle)", "? for shortcuts"]);

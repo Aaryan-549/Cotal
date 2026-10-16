@@ -49,6 +49,10 @@ const edit = (text: string, find: string, replace: string): string => {
 const CLAUDE_TRUST = fixture("claude-2.1.232-trust.bin");
 const CLAUDE_CHANNELS = fixture("claude-2.1.232-devchannels.bin");
 const CLAUDE_TRUST_NO_FIRST = fixture("claude-2.1.301-trust.bin");
+// Claude 2.1.301 under a Team org without channelsEnabled: no channel warning, straight to the input
+// screen. Raw output with bypassPermissions at 80 columns and the default mode at 120.
+const CLAUDE_READY = fixture("claude-2.1.301-ready.bin");
+const CLAUDE_READY_DEFAULT = fixture("claude-2.1.301-ready-default.bin");
 // The repaint after a Down: the cursor moves from No to Yes.
 const CLAUDE_TRUST_NO_FIRST_ON_YES = edit(edit(CLAUDE_TRUST_NO_FIRST,
   "\x1b[2G\x1b[38;5;153m❯\x1b[4GNo,", "\x1b[4GNo,"),
@@ -59,6 +63,12 @@ const TRUST_ON_NO = edit(edit(edit(CLAUDE_TRUST,
   "\x1b[4G\x1b[38;2;153;153;153m2.", "\x1b[2G❯\x1b[4G\x1b[38;2;153;153;153m2."),
   "/Users/cotal-tester", "/tmp/❯ 1. Yes, I trust this folder");
 const CLEAR = "\x1b[2J\x1b[H";
+// Startup dialogs the launch does not know. None may get a key or end the watch.
+const UNKNOWN_DIALOGS: [string, string][] = [
+  ["a trust layout nobody recognises", edit(CLAUDE_TRUST_NO_FIRST, "\x1b[22Gfolder", "\x1b[22Gplace")],
+  ["a login prompt", CLEAR + "Select login method:\r\n\r\n ❯ 1. Claude account with subscription\r\n   2. Anthropic Console account\r\n\r\n Enter to confirm · Esc to cancel"],
+  ["the bypass permissions acceptance", CLEAR + " WARNING: Claude Code running in Bypass Permissions mode\r\n\r\n ❯ 1. No, exit\r\n   2. Yes, I accept\r\n\r\n Enter to confirm · Esc to cancel"],
+];
 
 /** The pty runtime's screen mirror: @xterm/headless at that runtime's default size, read as it reads. */
 class Screen {
@@ -85,12 +95,12 @@ async function cell(name: string, body: () => void | Promise<void>): Promise<voi
 }
 
 /** Startup choices in both sequence copies and both watches, over real and older dialog screens. */
-async function choiceCells(final: string, replies: readonly StartupReply[]): Promise<void> {
+async function choiceCells(final: string, replies: readonly StartupReply[], ready: readonly string[]): Promise<void> {
   for (const [impl, Sequence] of [["core", CoreSequence], ["seat", SeatSequence]] as const) {
     await cell(`${impl}: real Claude 2.1.232 trust dialog gets one Enter on the selected Yes`, async () => {
       const screen = new Screen();
       await screen.write(CLAUDE_TRUST);
-      const sequence = new Sequence(final, replies);
+      const sequence = new Sequence(final, replies, ready);
       const keys: unknown[] = [];
       for (let i = 0; i < 4; i++) {
         const action = sequence.observe(screen.read());
@@ -104,7 +114,7 @@ async function choiceCells(final: string, replies: readonly StartupReply[]): Pro
     await cell(`${impl}: real Claude 2.1.301 trust dialog gets Down, then Enter once Yes is selected`, async () => {
       const screen = new Screen();
       await screen.write(CLAUDE_TRUST_NO_FIRST);
-      const sequence = new Sequence(final, replies);
+      const sequence = new Sequence(final, replies, ready);
       const keys: unknown[] = [];
       const observe = (): void => {
         const action = sequence.observe(screen.read());
@@ -124,13 +134,13 @@ async function choiceCells(final: string, replies: readonly StartupReply[]): Pro
       const screen = new Screen();
       await screen.write(TRUST_ON_NO);
       assert.equal(screen.selected(), "❯ 2. No, exit");
-      const sequence = new Sequence(final, replies);
+      const sequence = new Sequence(final, replies, ready);
       for (let i = 0; i < 6; i++) assert.equal(sequence.observe(screen.read()), undefined);
     });
     await cell(`${impl}: No-first trust layout gets Down, then Enter only once Yes is selected`, () => {
       const no = "❯ No, exit\nYes, I trust this folder";
       const yes = "No, exit\n❯ Yes, I trust this folder";
-      const sequence = new Sequence(final, replies);
+      const sequence = new Sequence(final, replies, ready);
       assert.equal(sequence.observe(`Accessing workspace:\n/tmp/${final}\n${no}`), undefined, "a directory containing the final prompt is not a confirmation dialog");
       assert.equal(sequence.observe("Allow Bash? Enter to confirm"), undefined);
       assert.equal(sequence.observe(yes), undefined, "an out-of-order selected row cannot authorize Enter");
@@ -144,7 +154,66 @@ async function choiceCells(final: string, replies: readonly StartupReply[]): Pro
       assert.equal(sequence.observe(yes), undefined, "never repeat Enter");
       assert.deepEqual(sequence.observe(final), { key: "Enter", done: true });
       assert.equal(sequence.observe(no), undefined, "ordinary session input cannot trigger startup replies");
-      assert.deepEqual(new Sequence(final, replies).observe(final), { key: "Enter", done: true }, "already trusted workspaces skip optional choices");
+      assert.deepEqual(new Sequence(final, replies, ready).observe(final), { key: "Enter", done: true }, "already trusted workspaces skip optional choices");
+    });
+    for (const [mode, bytes] of [["bypassPermissions", CLAUDE_READY], ["default", CLAUDE_READY_DEFAULT]]) {
+      await cell(`${impl}: real Claude 2.1.301 ready screen in ${mode} mode completes with no key`, async () => {
+        const screen = new Screen();
+        await screen.write(bytes);
+        const sequence = new Sequence(final, replies, ready);
+        assert.equal(sequence.observe(screen.read()), undefined, "the first snapshot of the ready screen is not trusted yet");
+        assert.deepEqual(sequence.observe(screen.read()), { done: true });
+        assert.equal(sequence.observe(screen.read()), undefined, "nothing after the watch is done");
+      });
+    }
+    await cell(`${impl}: ready text needs two consecutive snapshots`, async () => {
+      const screen = new Screen();
+      await screen.write(CLAUDE_READY);
+      const sequence = new Sequence(final, replies, ready);
+      assert.equal(sequence.observe(screen.read()), undefined);
+      assert.equal(sequence.observe("unrelated screen"), undefined);
+      assert.equal(sequence.observe(screen.read()), undefined, "a changed screen resets ready stability");
+      assert.deepEqual(sequence.observe(screen.read()), { done: true });
+    });
+    await cell(`${impl}: real Claude 2.1.232 channel warning still gets one Enter`, async () => {
+      const screen = new Screen();
+      await screen.write(CLAUDE_CHANNELS);
+      // A ready footer on the same screen never wins over the warning.
+      await screen.write("\x1b[30;1H  ⏵⏵ bypass permissions on (shift+tab to cycle)");
+      const sequence = new Sequence(final, replies, ready);
+      assert.deepEqual(sequence.observe(screen.read()), { key: "Enter", done: true });
+      assert.equal(sequence.observe(screen.read()), undefined, "exactly one Enter");
+    });
+    for (const [what, bytes] of UNKNOWN_DIALOGS) {
+      await cell(`${impl}: ${what} gets no key and never completes`, async () => {
+        const screen = new Screen();
+        await screen.write(bytes);
+        const sequence = new Sequence(final, replies, ready);
+        for (let i = 0; i < 6; i++) assert.equal(sequence.observe(screen.read()), undefined);
+      });
+    }
+    await cell(`${impl}: real Claude 2.1.232 trust dialog, then the 2.1.301 ready screen, gets one Enter and completes`, async () => {
+      const screen = new Screen();
+      // A ready text in the workspace path does not pre-empt the trust dialog.
+      await screen.write(edit(CLAUDE_TRUST, "/Users/cotal-tester", "/tmp/? for shortcuts"));
+      const sequence = new Sequence(final, replies, ready);
+      const keys: unknown[] = [];
+      for (let i = 0; i < 4; i++) {
+        const action = sequence.observe(screen.read());
+        if (action) keys.push({ ...action, on: screen.selected() });
+      }
+      assert.deepEqual(keys, [{ key: "Enter", done: false, on: "❯ 1. Yes, I trust this folder" }]);
+      await screen.write(CLEAR + CLAUDE_READY);
+      assert.equal(sequence.observe(screen.read()), undefined);
+      assert.deepEqual(sequence.observe(screen.read()), { done: true });
+      assert.equal(sequence.observe(screen.read()), undefined);
+    });
+    await cell(`${impl}: malformed ready texts are refused`, () => {
+      assert.throws(() => new Sequence(final, replies, [""]));
+      assert.throws(() => new Sequence(final, replies, [" \x1b[0m "]));
+      assert.throws(() => new Sequence(final, replies, [1 as unknown as string]));
+      assert.throws(() => new Sequence(final, replies, "? for shortcuts" as unknown as string[]));
+      assert.throws(() => new Sequence(final, replies, Array(9).fill("ready")));
     });
     await cell(`${impl}: malformed startup choices are refused`, () => {
       assert.throws(() => new Sequence("", replies));
@@ -154,45 +223,60 @@ async function choiceCells(final: string, replies: readonly StartupReply[]): Pro
   }
 
   // Both watches poll the screen on their own timers. Each test answers a key as Claude does:
-  // Enter on the trust dialog paints the channel warning.
-  const watch = async (arm: (screen: Screen, key: (key: "Down" | "Enter") => void) => () => void): Promise<string[]> => {
+  // Enter on the trust dialog paints the next screen, the channel warning or the input screen.
+  const watch = async (next: string, presses: number, arm: (read: () => string, key: (key: "Down" | "Enter") => void) => () => void, first = CLAUDE_TRUST) => {
     const screen = new Screen();
-    await screen.write(CLAUDE_TRUST);
+    await screen.write(first);
     const pressed: string[] = [];
-    const stop = arm(screen, (key) => {
+    let reads = 0;
+    const stop = arm(() => { reads++; return screen.read(); }, (key) => {
       pressed.push(`${key} on ${screen.selected()}`);
-      if (pressed.length === 1 && key === "Enter") void screen.write(CLEAR + CLAUDE_CHANNELS);
+      if (pressed.length === 1 && key === "Enter") void screen.write(CLEAR + next);
     });
-    for (let waited = 0; waited < 4_000 && pressed.length < 2; waited += 50) await sleep(50);
-    await sleep(750); // no key after the final confirmation
+    for (let waited = 0; waited < 4_000 && pressed.length < presses; waited += 50) await sleep(50);
+    await sleep(1_000); // no key once the watch is done, and no further screen reads
+    const settled = reads;
+    await sleep(750);
     stop();
-    return pressed;
+    return { pressed, polling: reads > settled, reads };
   };
-  const expected = ["Enter on ❯ 1. Yes, I trust this folder", "Enter on ❯ 1. I am using this for local development"];
-  await cell("seat gate: real Claude 2.1.232 trust and channel dialogs get one Enter each", async () => {
-    const reports: string[] = [];
-    const pressed = await watch((screen, key) => {
-      const gate = new StartupConfirmGate(final, replies);
-      gate.arm(new ConnectorDiagnosticReader(), { report: (message) => reports.push(message), stop: () => {} },
-        { read: () => screen.read(), key });
-      return () => gate.disarm();
-    });
-    assert.deepEqual(pressed, expected);
-    assert.deepEqual(reports, []);
-  });
-  await cell("core watch: real Claude 2.1.232 trust and channel dialogs get one Enter each", async () => {
-    const failures: string[] = [];
+  const seatGate = (failures: string[], choices = replies) => (read: () => string, key: (key: "Down" | "Enter") => void) => {
+    const gate = new StartupConfirmGate(final, choices, ready);
+    gate.arm(new ConnectorDiagnosticReader(), { report: (message) => failures.push(message), stop: () => {} }, { read, key });
+    return () => gate.disarm();
+  };
+  const coreWatch = (failures: string[], choices = replies) => (read: () => string, key: (key: "Down" | "Enter") => void) => {
     let open = true;
-    const pressed = await watch((screen, key) => {
-      confirmWatch(final, replies)({
-        read: () => open ? screen.read() : undefined,
-        enter: () => key("Enter"), down: () => key("Down"), fail: (message) => failures.push(message),
-      });
-      return () => { open = false; };
+    confirmWatch(final, choices, ready)({
+      read: () => open ? read() : undefined,
+      enter: () => key("Enter"), down: () => key("Down"), fail: (message) => failures.push(message),
     });
-    assert.deepEqual(pressed, expected);
-    assert.deepEqual(failures, []);
-  });
+    return () => { open = false; };
+  };
+  for (const [name, arm] of [["seat gate", seatGate], ["core watch", coreWatch]] as const) {
+    await cell(`${name}: real Claude 2.1.232 trust and channel dialogs get one Enter each`, async () => {
+      const failures: string[] = [];
+      const { pressed, polling } = await watch(CLAUDE_CHANNELS, 2, arm(failures));
+      assert.deepEqual(pressed, ["Enter on ❯ 1. Yes, I trust this folder", "Enter on ❯ 1. I am using this for local development"]);
+      assert.equal(polling, false, "the watch stops after the final confirmation");
+      assert.deepEqual(failures, []);
+    });
+    await cell(`${name}: real Claude 2.1.232 trust, then the 2.1.301 ready screen, gets one Enter and stops`, async () => {
+      const failures: string[] = [];
+      const { pressed, polling } = await watch(CLAUDE_READY, 1, arm(failures));
+      assert.deepEqual(pressed, ["Enter on ❯ 1. Yes, I trust this folder"]);
+      assert.equal(polling, false, "the watch stops on the ready screen");
+      assert.deepEqual(failures, []);
+    });
+    await cell(`${name}: a launch with no startup choices reads the screen and stops on the ready screen`, async () => {
+      const failures: string[] = [];
+      const { pressed, polling, reads } = await watch(CLAUDE_READY, 0, arm(failures, []), CLAUDE_READY);
+      assert.deepEqual(pressed, []);
+      assert.ok(reads >= 2, "ready texts are read from the screen, which needs two snapshots");
+      assert.equal(polling, false, "the watch stops on the ready screen");
+      assert.deepEqual(failures, []);
+    });
+  }
   console.log("CLAUDE WORKSPACE TRUST CELLS COMPLETE");
   assert.equal(cellFailures.length, 0, cellFailures.join("\n"));
 }
@@ -208,7 +292,11 @@ try {
   assert.equal(spec.args[spec.args.indexOf("--permission-mode") + 1], "default");
   discardLaunchArtifacts(spec.artifacts); discardLaunchArtifacts(foreground.artifacts);
   console.log("PASS managed launch configuration and foreground preservation");
-  await choiceCells(spec.confirm!, spec.confirmBefore!);
+  await cell("every Claude launch declares its input screen as ready", () => {
+    assert.deepEqual(spec.confirmReady, ["(shift+tab to cycle)", "? for shortcuts"]);
+    assert.deepEqual(foreground.confirmReady, spec.confirmReady, "a launch with no workspace also ends its watch on the input screen");
+  });
+  await choiceCells(spec.confirm!, spec.confirmBefore!, spec.confirmReady!);
 
   if (process.argv.includes("--live")) {
     const binary = cotalOriginal.get("COTAL_TEST_CLAUDE_BINARY");
