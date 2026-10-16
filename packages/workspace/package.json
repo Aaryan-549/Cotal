@@ -19,7 +19,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.smoke.json",
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-native.mjs && tsc -p tsconfig.json",
     "build:native": "node scripts/build-native.mjs",
     "test": "tsx smoke/preflight.smoke.ts && tsx smoke/maintenance.smoke.ts && tsx smoke/manager-shutdown.smoke.ts",
     "prepack": "node scripts/assert-shipped-natives.mjs",

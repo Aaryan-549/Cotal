@@ -23,7 +23,9 @@ generates its own `--help`, usage, and shell completion from its declared flags.
 In a dev clone, `pnpm cotal <command>` runs `bin/cotal.ts` through `tsx`, but `bin/` loads the other
 packages from their built `dist/`. Run `pnpm build` after `pnpm install`, and again after you edit a
 package, or the command fails with `ERR_MODULE_NOT_FOUND` for `@cotal-ai/cli/dist/index.js` or runs
-the old code.
+the old code. A Windows source build needs the matching MSVC Developer Command Prompt to compile
+its first-party process identity binding. Published packages already contain the x64 and arm64
+binaries and need no compiler or native download.
 
 Commands that run the automatic connector seed, such as `status`, then stop when the
 operator-global seed store is not current for the checkout's version, which includes a fresh config
