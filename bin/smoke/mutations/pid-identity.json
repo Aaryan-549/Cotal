@@ -117,6 +117,123 @@
       "expectRed": "P4 multiple pin lines are not a single identity record",
       "cell": "P4 multiple pin lines are not a single identity record",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M11 the Windows reader stops reaching its native binding",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  const out = read(pid);",
+      "replace": "  const out = undefined;",
+      "expectRed": "F7 win32 creation preserves every FILETIME digit through its reader",
+      "cell": "F7 win32 creation preserves every FILETIME digit through its reader",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M12 invalid Windows pids reach the native binding",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  if (!Number.isInteger(pid) || pid <= 0 || pid > 0x7fffffff) return undefined;",
+      "replace": "",
+      "expectRed": "F8 invalid Windows pids never reach the native reader",
+      "cell": "F8 invalid Windows pids never reach the native reader",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M13 Windows creation FILETIME is rounded through Number",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  const out = read(pid);",
+      "replace": "  const raw = read(pid);\n  const out = raw === undefined ? undefined : String(Number(raw));",
+      "expectRed": "F7 win32 creation preserves every FILETIME digit through its reader",
+      "cell": "F7 win32 creation preserves every FILETIME digit through its reader",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M14 a broken Windows binding is silently treated as an unreadable pid",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  const out = read(pid);",
+      "replace": "  let out: string | undefined;\n  try { out = read(pid); } catch { return undefined; }",
+      "expectRed": "F10 a broken Windows binding throws without retry",
+      "cell": "F10 a broken Windows binding throws without retry",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M15 an unavailable Windows identity is retried",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  const out = read(pid);",
+      "replace": "  const out = read(pid) ?? read(pid);",
+      "expectRed": "F9 an unavailable Windows identity stays unverified without retry",
+      "cell": "F9 an unavailable Windows identity stays unverified without retry",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M16 oversized Windows pids reach the native binding",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  if (!Number.isInteger(pid) || pid <= 0 || pid > 0x7fffffff) return undefined;",
+      "replace": "  if (!Number.isInteger(pid) || pid <= 0) return undefined;",
+      "expectRed": "F12 an oversized Windows pid never reaches the native reader",
+      "cell": "F12 an oversized Windows pid never reaches the native reader",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M17 malformed Windows native output becomes a pin token",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  return typeof out === \"string\" ? parseWin32CreationToken(out) : undefined;",
+      "replace": "  return out;",
+      "expectRed": "F11 malformed Windows native output is not a token",
+      "cell": "F11 malformed Windows native output is not a token",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M18 local stop accepts a request without the private nonce",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "!timingSafeEqual(Buffer.from(row.token, \"hex\"), Buffer.from(secret, \"hex\")) || ",
+      "replace": "",
+      "expectRed": "H1 a local stop without its private nonce cannot invoke cleanup",
+      "cell": "H1 a local stop without its private nonce cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M19 local stop ignores its target generation",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "row.target !== formatRecord(target) || typeof row.token",
+      "replace": "typeof row.token",
+      "expectRed": "H2 a local stop for another process generation cannot invoke cleanup",
+      "cell": "H2 a local stop for another process generation cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M20 local stop ignores the reservation inode",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "reservation(marker) !== row.reservation || ",
+      "replace": "",
+      "expectRed": "H3 a local stop with a replaced reservation cannot invoke cleanup",
+      "cell": "H3 a local stop with a replaced reservation cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M21 local stop accepts a stale stopper identity",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "stopper.kind !== \"record\" || assertRecordIdentity(stopper.record).kind !== \"match\"",
+      "replace": "stopper.kind !== \"record\"",
+      "expectRed": "H4 a local stop with a stale stopper identity cannot invoke cleanup",
+      "cell": "H4 a local stop with a stale stopper identity cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M22 local stop accepts oversized metadata",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "    if (length > 4096) throw new Error(\"local stop metadata exceeds 4096 bytes\");\n",
+      "replace": "",
+      "expectRed": "H5 oversized local stop metadata cannot invoke cleanup",
+      "cell": "H5 oversized local stop metadata cannot invoke cleanup",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M23 local cleanup exits before consuming its request",
+      "file": "packages/workspace/src/local-stop.ts",
+      "find": "      verified = true;\n",
+      "replace": "      onStop();\n      verified = true;\n",
+      "expectRed": "H8 a synchronous cleanup consumes its one-shot request before exiting",
+      "cell": "H8 a synchronous cleanup consumes its one-shot request before exiting",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     }
   ]
 }

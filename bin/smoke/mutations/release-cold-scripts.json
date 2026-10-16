@@ -1,0 +1,31 @@
+{
+  "suite": ["scripts/release-cold-publish.smoke.mjs"],
+  "guard": "The packer invokes prepublish guards before packing, and the publisher enforces secure preflight and disables publication-time lifecycle hooks",
+  "command": "node scripts/release-cold-publish.smoke.mjs",
+  "mutations": [
+    {
+      "name": "Cold candidate skips the prepublish guards",
+      "file": "scripts/pack-cold-candidate.mjs",
+      "find": "\"run\", \"prepublishOnly\"",
+      "replace": "\"run\", \"build\"",
+      "expectRed": "FAIL cold candidate runs prepublish guards before packing",
+      "cell": "cold candidate runs prepublish guards before packing"
+    },
+    {
+      "name": "Archive publisher bypasses the secure preflight",
+      "file": "scripts/publish-cold-candidate.mjs",
+      "find": "const census = await preflight({ root, env, exec });",
+      "replace": "const census = { state: 'ready', rows: [] };",
+      "expectRed": "FAIL secure preflight refusal prevents every publication",
+      "cell": "secure preflight refusal prevents every publication"
+    },
+    {
+      "name": "Archive publisher reruns package lifecycle hooks",
+      "file": "scripts/publish-cold-candidate.mjs",
+      "find": "\"--no-git-checks\", \"--ignore-scripts\", \"--tag\"",
+      "replace": "\"--no-git-checks\", \"--tag\"",
+      "expectRed": "FAIL publisher sends only qualified archive paths with provenance and no hooks",
+      "cell": "publisher sends only qualified archive paths with provenance and no hooks"
+    }
+  ]
+}

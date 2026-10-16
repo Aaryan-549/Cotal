@@ -24,51 +24,14 @@ concurrency:
   queue: max
 
 jobs:
-  seat-native-linux-x64:
-    name: seat native (linux-x64)
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6.0.8
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Build host native
-        run: pnpm --filter @cotal-ai/seat build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: seat-native-linux-x64
-          path: packages/seat/build/Release/linux-x64/peercred.node
-          if-no-files-found: error
-          retention-days: 7
-
-  seat-native-linux-arm64:
-    name: seat native (linux-arm64)
-    timeout-minutes: 15
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6.0.8
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Build host native
-        run: pnpm --filter @cotal-ai/seat build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: seat-native-linux-arm64
-          path: packages/seat/build/Release/linux-arm64/peercred.node
-          if-no-files-found: error
-          retention-days: 7
+  cold-setup:
+    uses: ./.github/workflows/cold-setup.yml
+    with:
+      snapshot: ${{ inputs.snapshot || '' }}
 
   version:
     if: github.event_name == 'push' || inputs.snapshot == ''
-    needs: [seat-native-linux-x64, seat-native-linux-arm64]
+    needs: [cold-setup]
     timeout-minutes: 35
     runs-on: ubuntu-latest
     environment: npm-publish
@@ -96,12 +59,13 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: seat-native-linux-x64
-          path: ${{ runner.temp }}/seat-native-linux-x64
+          pattern: cold-result-*
+          path: ${{ runner.temp }}/cold-results
+
       - uses: actions/download-artifact@v4
         with:
-          name: seat-native-linux-arm64
-          path: ${{ runner.temp }}/seat-native-linux-arm64
+          name: cold-candidate
+          path: ${{ runner.temp }}/cold-candidate
 
       - name: Create versions and publish
         id: changesets
@@ -114,8 +78,8 @@ jobs:
           setupGitUser: true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-          SEAT_NATIVE_X64: ${{ runner.temp }}/seat-native-linux-x64/peercred.node
-          SEAT_NATIVE_ARM64: ${{ runner.temp }}/seat-native-linux-arm64/peercred.node
+          COLD_CANDIDATE: ${{ runner.temp }}/cold-candidate
+          COLD_RESULTS: ${{ runner.temp }}/cold-results
 
       # Keep the "version packages" PR out of the generated release notes (excluded via .github/release.yml).
       - name: Label the release PR
@@ -266,6 +230,20 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-x64
+          path: ${{ runner.temp }}/workspace-native-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-native-arm64
+          path: ${{ runner.temp }}/workspace-native-arm64
+      - name: Assemble source-matched Windows identity bindings for the probe
+        run: node scripts/workspace-assemble-natives.mjs
+        env:
+          WORKSPACE_NATIVE_X64: ${{ runner.temp }}/workspace-native-x64
+          WORKSPACE_NATIVE_ARM64: ${{ runner.temp }}/workspace-native-arm64
+
       - name: Run install probe
         run: node scripts/post-publish-install-probe.mjs
 
@@ -275,7 +253,7 @@ jobs:
   # other branches are refused by the Environment gate before the OIDC exchange.
   snapshot:
     if: github.event_name == 'workflow_dispatch' && inputs.snapshot != ''
-    needs: [seat-native-linux-x64, seat-native-linux-arm64]
+    needs: [cold-setup]
     timeout-minutes: 20
     runs-on: ubuntu-latest
     environment: npm-publish
@@ -299,22 +277,20 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: seat-native-linux-x64
-          path: ${{ runner.temp }}/seat-native-linux-x64
+          pattern: cold-result-*
+          path: ${{ runner.temp }}/cold-results
+
       - uses: actions/download-artifact@v4
         with:
-          name: seat-native-linux-arm64
-          path: ${{ runner.temp }}/seat-native-linux-arm64
+          name: cold-candidate
+          path: ${{ runner.temp }}/cold-candidate
 
-      - name: Version snapshot
-        run: pnpm changeset version --snapshot ${{ inputs.snapshot }}
+      - name: Use the snapshot versions qualified on every platform
+        run: node scripts/apply-cold-versions.mjs "$RUNNER_TEMP/cold-candidate/manifest.json"
 
-      - name: Preflight, build, assemble natives, and publish
+      - name: Preflight and publish the qualified snapshot archives
         env:
-          SEAT_NATIVE_X64: ${{ runner.temp }}/seat-native-linux-x64/peercred.node
-          SEAT_NATIVE_ARM64: ${{ runner.temp }}/seat-native-linux-arm64/peercred.node
-        run: |
-          node scripts/preflight-npm-publish.mjs
-          pnpm build
-          node scripts/seat-assemble-natives.mjs
-          pnpm publish -r --provenance --access=public --no-git-checks --tag ${{ inputs.snapshot }}
+          COLD_CANDIDATE: ${{ runner.temp }}/cold-candidate
+          COLD_RESULTS: ${{ runner.temp }}/cold-results
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: node scripts/publish-cold-candidate.mjs "$SNAPSHOT"

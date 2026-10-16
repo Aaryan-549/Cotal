@@ -18,7 +18,8 @@
  * module they may depend on, never a core export.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { nativeWin32CreationToken } from "./win32-process.js";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { acquireLock, processStartToken as posixStartToken } from "./advisory-lock.js";
@@ -276,7 +277,7 @@ export function formatRecord(record: ProcessIdentityRecord): string {
 /**
  * The creation-identity token of a live pid: on Linux `/proc/<pid>/stat` field 22 (starttime —
  * ticks since boot, fixed for the life of the pid); on macOS/BSD `ps -o lstart=`; on Windows
- * the process creation FILETIME (PowerShell `Get-Process StartTime`, #1437). A pid whose token is
+ * the process creation FILETIME (GetProcessTimes through the shipped Node-API binding). A pid whose token is
  * `undefined` can still be recorded — the record then carries no start pin, and teardown warns that
  * it is proceeding without the identity check. That pid-only shape is for a record that predates
  * pinning, or a host that could not read a start at all. It is not the Windows steady state.
@@ -284,7 +285,7 @@ export function formatRecord(record: ProcessIdentityRecord): string {
 export type ProcessStartTokenReader = (pid: number) => string | undefined;
 
 /**
- * Parse the stdout of the Windows creation-time reader into a pin token. Accepts only a bare
+ * Parse the Windows creation-time reader's decimal string into a pin token. Accepts only a bare
  * unsigned FILETIME integer so a MSYS `ps` date string cannot become a "token" that drifts
  * between launch and teardown (the original reason the lock reader refuses win32 `ps`).
  */
@@ -294,28 +295,14 @@ export function parseWin32CreationToken(raw: string): string | undefined {
 }
 
 /**
- * Windows process-creation identity (#1437). A stop runs once, so unlike the advisory lock this
- * may spend a PowerShell spawn: the token must be STABLE, not cheap. `Get-Process StartTime`
- * converted to UTC FILETIME is fixed for the life of that pid and changes when the number is
- * reused. `undefined` means the process is gone or PowerShell could not answer.
+ * Windows creation FILETIME through the shipped Node-API binding. No subprocess or runtime
+ * discovery is involved. An inaccessible process is unverified; a missing binding throws.
+ * The reader parameter exercises validation off Windows; native suites execute the real binding.
  */
-export function win32ProcessCreationToken(pid: number): string | undefined {
-  if (!Number.isInteger(pid) || pid <= 0) return undefined;
-  try {
-    const out = execFileSync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToFileTimeUtc()`,
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 },
-    );
-    return parseWin32CreationToken(out);
-  } catch {
-    return undefined;
-  }
+export function win32ProcessCreationToken(pid: number, read: ProcessStartTokenReader = nativeWin32CreationToken): string | undefined {
+  if (!Number.isInteger(pid) || pid <= 0 || pid > 0x7fffffff) return undefined;
+  const out = read(pid);
+  return typeof out === "string" ? parseWin32CreationToken(out) : undefined;
 }
 
 /** Identity's start-token reader: POSIX uses the same `/proc`/`ps` implementation as the advisory
@@ -338,7 +325,7 @@ export function defaultStartToken(pid: number): string | undefined {
 
 /** The start token for a pid THIS PROCESS is about to record. Prefer the reader passed by the
  *  caller (tests inject divergence), fall back to {@link defaultStartToken}. `undefined` (a
- *  ps-less host, or a Windows pid PowerShell could not read) records a pid-only LEGACY record —
+ *  ps-less host, or a Windows pid the OS could not read) records a pid-only LEGACY record —
  *  visible as such to every reader, never silently. */
 export function identityRecord(pid: number, tokenAt: ProcessStartTokenReader = defaultStartToken): ProcessIdentityRecord | { pid: number } {
   const token = tokenAt(pid);

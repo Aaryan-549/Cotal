@@ -744,6 +744,8 @@ const REVIEWED: Record<string, string> = {
     "same ext-update shape: self-reentered node helpers reading COTAL_UPDATE_* / XDG_CONFIG_HOME, no connection material read",
   "bin/smoke/herdr-e2e-live.smoke.ts":
     "spawns herdr-e2e-manager-child.mjs, which builds its OWN stub identity from HE2E_* and sets the COTAL_ vars itself rather than reading the inherited ones",
+  "packages/workspace/smoke/win32-creation-native.smoke.ts":
+    "the spread only saves process.env for restoration in finally; coldOsEnvironment(before) replaces process.env before any child is spawned, and the snapshot is never passed to a child",
 };
 
 const REGISTRY_HOME_REVIEWED: Record<string, string> = {

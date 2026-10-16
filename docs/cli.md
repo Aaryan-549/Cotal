@@ -23,7 +23,9 @@ generates its own `--help`, usage, and shell completion from its declared flags.
 In a dev clone, `pnpm cotal <command>` runs `bin/cotal.ts` through `tsx`, but `bin/` loads the other
 packages from their built `dist/`. Run `pnpm build` after `pnpm install`, and again after you edit a
 package, or the command fails with `ERR_MODULE_NOT_FOUND` for `@cotal-ai/cli/dist/index.js` or runs
-the old code.
+the old code. A Windows source build needs the matching MSVC Developer Command Prompt to compile
+its first-party process identity binding. Published packages already contain the x64 and arm64
+binaries and need no compiler or native download.
 
 Commands that run the automatic connector seed, such as `status`, then stop when the
 operator-global seed store is not current for the checkout's version, which includes a fresh config
@@ -41,6 +43,12 @@ COTAL_SKIP_CONNECTOR_SEED=1 pnpm cotal status
 Pointing `XDG_CONFIG_HOME` at a scratch dir is not enough by itself. Isolated release tests
 that must seed from a checkout also set `COTAL_ALLOW_CHECKOUT_SEED=1`, as described under
 [Built-in connectors are seeded extensions](#built-in-connectors-are-seeded-extensions).
+
+Before publication, the release workflow installs the packaged candidate into fresh homes and
+caches on Linux, macOS and Windows, on x64 and arm64 with Node 22, 24 and 26. Each setup seeds
+connectors, starts the broker, delivery daemon and Manager, checks native process identity and
+Manager control, then stops and restarts them. Every platform must pass before normal or snapshot
+publication can proceed.
 
 An undeclared flag is a usage error, and so is a flag given more than once unless it is
 repeatable, as `--opt` and `down --session-store` are. The command prints the error and its help,
@@ -371,8 +379,12 @@ it: every manager stop stops and deprovisions them, and `down` reports them as s
 stop the CLI makes runs this one path: `down`, Ctrl-C on a foreground `cotal up`, the teardown after
 that `up`'s broker exits, the leftover-manager stop before `cotal up -f`, and the delivery cutover.
 Each holds the manager's stop reservation, so a second stop while one is in flight is refused,
-names the process holding it, and leaves that stop's `--with-agents` policy in place. Each sends
-`SIGKILL` to a manager still running 15s after `SIGTERM`. Ctrl-C stops the manager first; when that
+names the process holding it, and leaves that stop's `--with-agents` policy in place. On Windows,
+manager and delivery stops send an authenticated local cleanup request because Windows process
+signals terminate without running cleanup handlers. The request requires the process's private
+capability, its creation identity and the live stopper's identity and reservation. Other platforms
+use `SIGTERM`. A process still running after 20s on the Windows cooperative path, or 15s after
+`SIGTERM`, receives `SIGKILL`. Ctrl-C stops the manager first; when that
 stop is refused or the manager's exit cannot be confirmed, Ctrl-C signals nothing else, prints the
 refusal with the reap route, and leaves the stack running; end it with `cotal down --with-agents`.
 `--with-agents` is a one-shot destructive policy bound to the exact verified manager process
@@ -421,6 +433,10 @@ extension components, and the manager, delivery and auth-service stops, applies 
 that names a different start means the pid was reused, so teardown refuses and preserves it. A torn
 or unreadable pin also refuses. macOS start tokens keep their spaces, including the padded day,
 in both the identity pin and the one-shot shutdown intent. A single record cannot span lines.
+On Windows, the reader calls `GetProcessTimes` through a bundled Node-API binding for x64 or
+arm64. It requests limited process-query access and preserves the creation FILETIME as a decimal
+string. It launches no subprocess. Access denial leaves identity unverified; an unreadable pin
+still refuses teardown. A missing or damaged binding is an installation error and has no fallback.
 
 The pidfile and its pin are published by renames, and the pidfile rename is the commit point. Just
 before it, the pin holds two lines: the old process's and the new one's. A launcher that dies
@@ -451,8 +467,12 @@ dead, still refuses. Inspect both pids with `ps`. Do not delete `<pidfile>.ident
 stop; that weakens target-identity protection. Once the pidfile process is dead, rerunning
 teardown clears the stale record automatically.
 
-The first teardown after upgrading a running pre-pin stack has a narrower guarantee. A live record
-with no identity pin is signalled after a loud warning that it predates identity pinning. Restarting
+A Windows manager or delivery daemon without the cooperative capability must be stopped through
+its original supervisor before restarting with this version. Teardown refuses it without signalling
+or deleting its live record. It does not wait for a lease to expire or delete a lease by local pid.
+
+For components using signals, the first teardown after upgrading a running pre-pin stack has a
+narrower guarantee. A live record with no identity pin is signalled after a loud warning that it predates identity pinning. Restarting
 the component writes the pin, so later teardowns receive full match and mismatch protection. The
 same warning applies on platforms where no stable start token is available. For a legacy manager,
 bare `cotal down` also warns that agent sparing cannot be verified before it signals. Because the
