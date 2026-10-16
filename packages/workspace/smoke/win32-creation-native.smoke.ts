@@ -1,5 +1,7 @@
 /** Native Windows cold-profile creation identity. Run only on a Windows runner. */
 import { strict as assert } from "node:assert";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +11,26 @@ import { coldOsEnvironment } from "../../../scripts/release-cold-environment.mjs
 assert.equal(process.platform, "win32", "this suite requires a native Windows runner");
 const root = mkdtempSync(join(tmpdir(), "win32-cold-identity-"));
 const before = { ...process.env };
+const originalExec = childProcess.execFileSync;
+let invocation = 0;
+childProcess.execFileSync = ((...args: Parameters<typeof originalExec>) => {
+  const measured = args[0] === "powershell.exe";
+  const started = performance.now();
+  const report = (result: string, error?: unknown): void => {
+    if (!measured) return;
+    const failure = error as { code?: string; status?: number; signal?: string; stdout?: Buffer } | undefined;
+    console.log(JSON.stringify({ nativeCreationAttempt: ++invocation, result, elapsedMs: Math.round(performance.now() - started), timeout: (args[2] as { timeout?: number } | undefined)?.timeout, code: failure?.code, status: failure?.status, signal: failure?.signal, failedStdoutBytes: failure?.stdout?.length ?? 0 }));
+  };
+  try {
+    const result = Reflect.apply(originalExec, childProcess, args);
+    report("returned");
+    return result;
+  } catch (error) {
+    report("threw", error);
+    throw error;
+  }
+}) as typeof originalExec;
+syncBuiltinESMExports();
 const check = (name: string, condition: boolean): void => {
   if (!condition) console.error(`FAIL ${name}`);
   assert.ok(condition, name);
@@ -31,6 +53,8 @@ try {
   check("W3 native Windows creation identity still refuses a changed token", assertRecordIdentity({ pid: process.pid, token: `${token}0` }).kind === "mismatch");
   console.log("WINDOWS COLD CREATION OK (3 checks; native Windows only)");
 } finally {
+  childProcess.execFileSync = originalExec;
+  syncBuiltinESMExports();
   for (const key of Object.keys(process.env)) delete process.env[key];
   Object.assign(process.env, before);
   rmSync(root, { recursive: true, force: true });

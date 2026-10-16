@@ -88,6 +88,7 @@ const spawnLocalTarget = async (pidPath: string): Promise<ReturnType<typeof spaw
   });
   return child;
 };
+let suiteFailed = false;
 try {
   await wait(200); // let every child install its SIGTERM handler before any cell runs
 
@@ -445,10 +446,27 @@ try {
     check("H7 a predecessor stop leaves a successor capability intact", existsSync(successor) && !existsSync(`${prefix}.ready`));
     rmSync(marker);
   }
+} catch (error) {
+  suiteFailed = true;
+  throw error;
 } finally {
   for (const s of strays) reap(s);
+  const exited = await Promise.all(strays.map((child) => new Promise<boolean>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) { resolve(true); return; }
+    const timer = setTimeout(() => resolve(false), 5000);
+    child.once("exit", () => { clearTimeout(timer); resolve(true); });
+  })));
   process.chdir(prevCwd);
-  rmSync(root, { recursive: true, force: true });
+  if (exited.some((gone) => !gone)) {
+    console.error(`! test state retained at ${root}: a child exit could not be confirmed`);
+    if (!suiteFailed) throw new Error("test cleanup could not confirm every child exit");
+  } else {
+    try { rmSync(root, { recursive: true, force: true }); }
+    catch (error) {
+      if (!suiteFailed) throw error;
+      console.error(`! test state retained at ${root}: cleanup ${(error as NodeJS.ErrnoException).code}; the original suite failure is preserved`);
+    }
+  }
 }
 
 console.log(`\nPID IDENTITY TESTS PASSED ✅  (${pass} checks)`);
