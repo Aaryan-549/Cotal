@@ -112,6 +112,7 @@ const csJobs = jobs(csText);
 const pack = ciJobs.get("seat-pack") ?? "";
 const version = csJobs.get("version") ?? "";
 const snapshot = csJobs.get("snapshot") ?? "";
+const installProbe = csJobs.get("install-probe") ?? "";
 const rootPkg = JSON.parse(readFileSync(PKG, "utf8")) as { scripts?: Record<string, string> };
 const ciPublish = rootPkg.scripts?.["ci:publish"] ?? "";
 
@@ -154,6 +155,10 @@ check("normal publication invokes the qualified archive publisher", /publish:\s*
 check("snapshot publication invokes the qualified archive publisher", /run: node scripts\/publish-cold-candidate\.mjs/.test(snapshot));
 check("archive publisher reaches the secure preflight before publication", publisher.indexOf("await preflight({ root, env, exec })") >= 0 && publisher.indexOf("await preflight({ root, env, exec })") < publisher.indexOf('exec("pnpm", ["publish"'));
 check("archive publisher does not rebuild or rerun package hooks", publisher.includes('["publish", pkg.archive, "--provenance", "--access=public", "--no-git-checks", "--ignore-scripts"') && !/"build"|"seat-assemble-natives"|"-r"/.test(publisher));
+check("release install probe assembles both Windows native artifacts before packing",
+  ["workspace-native-x64", "workspace-native-arm64"].every((name) => downloaded(installProbe).includes(name)) &&
+  installProbe.indexOf("workspace-assemble-natives.mjs") >= 0 &&
+  installProbe.indexOf("workspace-assemble-natives.mjs") < installProbe.indexOf("post-publish-install-probe.mjs"));
 
 console.log(`\n${fail === 0 ? "SEAT NATIVE CI SMOKE OK" : "SEAT NATIVE CI SMOKE FAILED"}  (${pass} passed, ${fail} failed)`);
 console.log(`SUITE COMPLETE: ${pass} passed, ${fail} failed`);

@@ -107,6 +107,14 @@
       "replace": "        run: echo skip-workspace-native-assembly\n",
       "expectRed": "cold candidate assembles Windows natives before packing",
       "cell": "cold candidate assembles Windows natives before packing"
+    },
+    {
+      "name": "Release install probe skips Windows native assembly",
+      "file": ".github/workflows/changesets.yml",
+      "find": "        run: node scripts/workspace-assemble-natives.mjs\n",
+      "replace": "        run: echo skip-workspace-native-assembly\n",
+      "expectRed": "release install probe assembles both Windows native artifacts before packing",
+      "cell": "release install probe assembles both Windows native artifacts before packing"
     }
   ]
 }
