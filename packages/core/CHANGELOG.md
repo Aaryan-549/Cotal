@@ -1,5 +1,7 @@
 # @cotal-ai/core
 
+## 0.82.1
+
 ## 0.82.0
 
 ### Minor Changes

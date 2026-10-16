@@ -1,5 +1,14 @@
 # @cotal-ai/workspace
 
+## 0.82.1
+
+### Patch Changes
+
+- 9061234: Read Windows process creation time through a bundled x64 or arm64 Node-API binding instead of starting PowerShell. Preserve every FILETIME digit and keep access-denied identities unverified. Missing or damaged native bindings fail loudly without a subprocess fallback.
+- 423d250: Read a process identity pin whose start token has spaces. On macOS the token is `ps -o lstart=` output, such as `Thu Oct 15 21:16:51 2026`, and the pin parser accepted only two whitespace-separated fields. Every pin written on a Mac therefore read back as unattributable: the manager stopped right after boot when it failed its own pin, and `cotal down` refused to stop any component. The parser now reads the pid and keeps the rest of the line as the token, unchanged. Pins written by processes that are already running read correctly once this release is installed.
+- b526a5e: Stop local Windows managers and delivery daemons through an authenticated process-bound cleanup request, so immediate restart can acquire leases released by the previous generation. Keep identity checks, stop reservations and the existing one-shot agent-reap policy. Refuse older Windows daemons without this capability instead of force-terminating them without cleanup.
+  - @cotal-ai/core@0.82.1
+
 ## 0.82.0
 
 ### Patch Changes
