@@ -152,13 +152,17 @@ cotal update [--self] [--space <s>] [--server <url>] [--creds <path>]
 | `--self` | off | If a newer release exists, install that exact validated `cotal-ai` version globally and reconcile through the newly installed binary |
 | `--space`, `--server`, `--creds` | resolved mesh | Select the running manager whose continuity state is reported |
 
+Update reads the recorded mesh inventory without refreshing account space catalogues. An expired
+login to a remote mesh does not block the software update. Local manager continuity checks still
+apply before changing the installation.
+
 Without `--self`, `update` keeps the installed first-party surfaces coherent with the running
 binary: it force-reconciles the four built-in connectors, then reinstalls other `@cotal-ai/*`
 operator extensions at the binary's exact version. Each extension runs in an isolated child, so one
 failure cannot poison later replays. It then checks npm; a newer binary is an informational notice
 with `cotal update --self` as the next command, not an automatic install.
 
-After disk reconciliation, `update` reads the selected running manager. A machine with no recorded
+Before disk reconciliation, `update` reads the selected running manager. A machine with no recorded
 mesh has no running manager to observe, so that read is skipped and the command completes. The same
 holds when every recorded mesh is down and none is selected. A remote user mesh, registered with
 `cotal meshes add --mode user`, is named and skipped: its manager runs under another install, so
