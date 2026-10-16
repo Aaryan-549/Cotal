@@ -21,6 +21,16 @@
       "expectRed": "tmux-normal: final confirmation disarms the deadline",
       "cell": "tmux-normal: final confirmation disarms the deadline",
       "afterRestore": "pnpm --filter @cotal-ai/core build"
+    },
+    {
+      "name": "replay terminal capability queries from the captured ready screen",
+      "file": "implementations/manager/smoke/fixtures/startup-choices.cjs",
+      "find": "  .replace(/\\x1b\\[(?:>0q|\\?u|c)|\\x1b\\]7501;\\?\\x07/g, \"\");",
+      "replace": "  ;",
+      "command": "node --check implementations/manager/smoke/fixtures/startup-choices.cjs && pnpm exec tsx implementations/manager/smoke/startup-choices.smoke.ts",
+      "expectRed": "startup fixture log stays within 64KiB (no terminal reply loop)",
+      "cell": "startup fixture log stays within 64KiB (no terminal reply loop)",
+      "note": "Real tmux replies must not feed a raw capture back into itself. The unchanged bounded reader fails before parsing a runaway log, without a model request or global OOM."
     }
   ]
 }

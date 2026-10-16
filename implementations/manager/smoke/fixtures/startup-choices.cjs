@@ -2,7 +2,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const [file, mode] = process.argv.slice(2);
 // Claude 2.1.301's raw input screen, for a harness that skips the final prompt.
-const READY = fs.readFileSync(path.join(__dirname, "claude-2.1.301-ready.bin"), "utf8");
+// Replaying a capture must not repeat device probes on every terminal reply. Keep the paints,
+// but omit the capability queries that a live Claude process handles itself.
+const READY = fs.readFileSync(path.join(__dirname, "claude-2.1.301-ready.bin"), "utf8")
+  .replace(/\x1b\[(?:>0q|\?u|c)|\x1b\]7501;\?\x07/g, "");
 let phase = { trusted: "final", "ready-trusted": "ready", unknown: "unknown" }[mode] ?? "trust";
 let yes = false;
 const render = () => {

@@ -2,7 +2,7 @@
  * This checks final confirmation/timeout custody; claude-workspace-trust covers real native trust. */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,10 @@ const handles: AgentHandle[] = [];
 let ownsTmux = false;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const rows = (path: string): { key: string; phase: string }[] => {
-  try { return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((r) => JSON.parse(r)); }
+  try {
+    assert.ok(statSync(path).size <= 64 * 1024, "startup fixture log stays within 64KiB (no terminal reply loop)");
+    return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((r) => JSON.parse(r));
+  }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
 };
 const failures: string[] = [];
