@@ -47,6 +47,8 @@ const edit = (text: string, find: string, replace: string): string => {
 // Raw Claude Code output captured in a pty before any key: 2.1.232 at 80 columns, 2.1.301 at 120.
 // Only the user name in each trust dialog's path is renamed, to one of the same length.
 const CLAUDE_TRUST = fixture("claude-2.1.232-trust.bin");
+const CLAUDE_TRUST_PATH = /\/[^\x1b\r\n]+/.exec(CLAUDE_TRUST)?.[0];
+assert.ok(CLAUDE_TRUST_PATH, "captured trust dialog has a workspace path");
 const CLAUDE_CHANNELS = fixture("claude-2.1.232-devchannels.bin");
 const CLAUDE_TRUST_NO_FIRST = fixture("claude-2.1.301-trust.bin");
 // Claude 2.1.301 under a Team org without channelsEnabled: no channel warning, straight to the input
@@ -61,7 +63,7 @@ const CLAUDE_TRUST_NO_FIRST_ON_YES = edit(edit(CLAUDE_TRUST_NO_FIRST,
 const TRUST_ON_NO = edit(edit(edit(CLAUDE_TRUST,
   "\x1b[2G\x1b[38;2;177;185;249m❯\x1b[4G", "\x1b[4G"),
   "\x1b[4G\x1b[38;2;153;153;153m2.", "\x1b[2G❯\x1b[4G\x1b[38;2;153;153;153m2."),
-  "/Users/cotal-tester", "/tmp/❯ 1. Yes, I trust this folder");
+  CLAUDE_TRUST_PATH, "/tmp/❯ 1. Yes, I trust this folder");
 const CLEAR = "\x1b[2J\x1b[H";
 // Startup dialogs the launch does not know. None may get a key or end the watch.
 const UNKNOWN_DIALOGS: [string, string][] = [
@@ -195,7 +197,7 @@ async function choiceCells(final: string, replies: readonly StartupReply[], read
     await cell(`${impl}: real Claude 2.1.232 trust dialog, then the 2.1.301 ready screen, gets one Enter and completes`, async () => {
       const screen = new Screen();
       // A ready text in the workspace path does not pre-empt the trust dialog.
-      await screen.write(edit(CLAUDE_TRUST, "/Users/cotal-tester", "/tmp/? for shortcuts"));
+      await screen.write(edit(CLAUDE_TRUST, CLAUDE_TRUST_PATH, "/tmp/? for shortcuts"));
       const sequence = new Sequence(final, replies, ready);
       const keys: unknown[] = [];
       for (let i = 0; i < 4; i++) {
