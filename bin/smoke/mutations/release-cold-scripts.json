@@ -2,7 +2,6 @@
   "suite": ["scripts/release-cold-publish.smoke.mjs"],
   "guard": "The packer invokes prepublish guards before packing, and the publisher enforces secure preflight and disables publication-time lifecycle hooks",
   "command": "node scripts/release-cold-publish.smoke.mjs",
-  "completionMarker": "SUITE COMPLETE",
   "mutations": [
     {
       "name": "Cold candidate skips the prepublish guards",
