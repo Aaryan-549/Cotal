@@ -28,6 +28,11 @@ reason. Useful flags: `--dry-run` to see the plan, `--no-modify-path` to leave y
 alone, `--no-setup` to install only. Pass them through the pipe as
 `| sh -s -- --dry-run`.
 
+Use the absolute launcher printed by the installer if plain `cotal` still selects an older
+installation. `type -a cotal` shows shell aliases, functions and executable candidates. The
+installer cannot change the current shell's cached command; refresh that cache after correcting
+PATH order. Do not follow an older executable's force-seed advice to repair command selection.
+
 On Windows, or if you already run Node 22+ and would rather use npm directly:
 
 ```bash

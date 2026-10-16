@@ -18,6 +18,13 @@
       "find": "if (actorToken !== undefined && findActorUnified(dir, owner, actor)?.tokenHash !== hashActorToken(actorToken)) return false;",
       "replace": "if (false && actorToken !== undefined && findActorUnified(dir, owner, actor)?.tokenHash !== hashActorToken(actorToken)) return false;",
       "expectRed": "stale token cleanup cannot revoke same-UID successor"
+    },
+    {
+      "name": "fresh grant occupancy loses its typed collision signal",
+      "file": "implementations/auth/src/provider.ts",
+      "find": "        throw new AgentGrantConflictError(actor);",
+      "replace": "        throw new Error(new AgentGrantConflictError(actor).message);",
+      "expectRed": "fresh grant refuses without replacing original row"
     }
   ]
 }
