@@ -63,7 +63,11 @@
     "raw offsets must red where an earlier escape would move a top-level scrub inside a brace.",
     "",
     "N14 PROVES TEMPLATE-SPAN COOKED TEXT KEEPS SOURCE COORDINATES. Replacing the mapper with",
-    "raw offsets must red where an earlier escape would move a top-level scrub inside a brace."
+    "raw offsets must red where an earlier escape would move a top-level scrub inside a brace.",
+    "",
+    "N15 REMOVES THE REVIEWED RESTORATION SNAPSHOT. Its copy is never child env; the native suite",
+    "replaces process.env with coldOsEnvironment(before) before spawning. Removing its measured",
+    "review entry must reproduce the native snapshot offender without weakening spread detection."
   ],
   "mutations": [
     {
@@ -178,6 +182,14 @@
       "replace": "              rawSourceOffsets,\n",
       "expectRed": "an escaped template-span scrub must retain its source brace depth",
       "note": "Proves escaped cooked text in a template span retains original source coordinates instead of using raw offsets directly."
+    },
+    {
+      "name": "N15 the native cold suite loses its reviewed restoration snapshot",
+      "file": "bin/smoke/suite-ambient-env.smoke.ts",
+      "find": "  \"packages/workspace/smoke/win32-creation-native.smoke.ts\":\n    \"the spread only saves process.env for restoration in finally; coldOsEnvironment(before) replaces process.env before any child is spawned, and the snapshot is never passed to a child\",\n",
+      "replace": "",
+      "expectRed": "packages/workspace/smoke/win32-creation-native.smoke.ts (unstripped spread at line 15)",
+      "note": "Reproduces the live CI failure when the measured snapshot review is removed. The classifier and frozen baseline stay unchanged."
     }
   ]
 }
