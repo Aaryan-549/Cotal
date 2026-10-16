@@ -66,7 +66,7 @@ jobs:
           node --input-type=module -e '
             import {writeFileSync} from "node:fs";
             const command=JSON.stringify(process.execPath.replaceAll("\\","/"))+" --import tsx packages/workspace/smoke/pid-identity.smoke.ts";
-            const cell="C1 a MATCHING pin IS torn down (SIGTERM, death confirmed, record cleared)";
+            const cell="C1 a MATCHING pin IS torn down (cleanup, death confirmed, record cleared)";
             const proof={suite:["packages/workspace/smoke/pid-identity.smoke.ts"],command,mutations:[{
               name:"Windows stop bypasses cooperative cleanup",
               file:"implementations/cli/src/lib/local-process-stop.ts",

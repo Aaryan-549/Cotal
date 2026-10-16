@@ -42,7 +42,8 @@ function metadata(path: string): Record<string, unknown> {
 
 /** Publish a process-bound local control capability before publishing the daemon's pid record.
  * The private nonce is required even in a writable workspace: a public pid/start token alone must
- * not let another OS user trigger an elevated daemon's cleanup. Hosted services do not call this. */
+ * not let another OS user trigger an elevated daemon's cleanup. Consume the request before invoking
+ * cleanup, including a callback that exits synchronously. Hosted services do not call this. */
 export function listenForLocalStop(pidPath: string, onStop: () => void): () => void {
   const token = defaultStartToken(process.pid);
   if (token === undefined) throw new Error("cannot advertise local stop without a process creation identity");
@@ -53,6 +54,7 @@ export function listenForLocalStop(pidPath: string, onStop: () => void): () => v
   mkSecretDir(ensureDirNoSymlink(dirname(pidPath), "local-stop"));
   writeSecretFileCreateOnly(paths.ready, JSON.stringify({ version: 1, target: formatRecord(target), token: secret }));
   const timer = setInterval(() => {
+    let verified = false;
     const claimed = `${paths.request}.${process.pid}.${randomBytes(8).toString("hex")}.consuming`;
     try { renameSync(paths.request, claimed); }
     catch (error) {
@@ -70,12 +72,13 @@ export function listenForLocalStop(pidPath: string, onStop: () => void): () => v
       const marker = stopReservationPath(pidPath);
       if (reservation(marker) !== row.reservation || parsePid(readFileSync(marker, "utf8")) !== stopper.record.pid) return;
       clearInterval(timer);
-      onStop();
+      verified = true;
     } catch {
       console.error("! ignored local stop request that could not be verified");
     } finally {
       rmSync(claimed, { force: true });
     }
+    if (verified) onStop();
   }, 100);
   timer.unref();
   const dispose = (): void => {

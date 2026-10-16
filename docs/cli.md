@@ -463,8 +463,8 @@ A Windows manager or delivery daemon without the cooperative capability must be 
 its original supervisor before restarting with this version. Teardown refuses it without signalling
 or deleting its live record. It does not wait for a lease to expire or delete a lease by local pid.
 
-On other platforms, the first teardown after upgrading a running pre-pin stack has a narrower
-guarantee. A live record with no identity pin is signalled after a loud warning that it predates identity pinning. Restarting
+For components using signals, the first teardown after upgrading a running pre-pin stack has a
+narrower guarantee. A live record with no identity pin is signalled after a loud warning that it predates identity pinning. Restarting
 the component writes the pin, so later teardowns receive full match and mismatch protection. The
 same warning applies on platforms where no stable start token is available. For a legacy manager,
 bare `cotal down` also warns that agent sparing cannot be verified before it signals. Because the
