@@ -2,7 +2,7 @@
   "suite": ["implementations/cli/smoke/installer-selection.smoke.ts"],
   "guard": "The installer reports actual PATH shadowing and prints its own absolute executable without pretending to modify the parent shell",
   "command": "pnpm exec tsx implementations/cli/smoke/installer-selection.smoke.ts",
-  "completionMarker": "INSTALLER SELECTION:",
+  "why": ["The real-shell suite uses fail-fast assertions. An expected named assertion failure stops later cases and retains its fixture, so the success-only completion line is not a red-run requirement."],
   "mutations": [
     {
       "name": "disconnect PATH-selection reporting from the actual installer main path",

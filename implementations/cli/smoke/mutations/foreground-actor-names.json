@@ -2,7 +2,7 @@
   "suite": ["implementations/cli/smoke/foreground-actor-names.smoke.ts"],
   "guard": "Implicit foreground actors allocate without replacing held material, while explicit identities and non-collision failures remain pinned",
   "command": "pnpm exec tsx implementations/cli/smoke/foreground-actor-names.smoke.ts",
-  "completionMarker": "FOREGROUND ACTOR NAMING:",
+  "why": ["The real-process suite uses fail-fast assertions with dependent lifecycle steps. A named assertion failure intentionally stops later steps, while finally reaps every owned process. Do not require the success-only completion line on an expected red."],
   "mutations": [
     {
       "name": "disable implicit foreground collision allocation",
