@@ -54,7 +54,7 @@ try {
   const events = [];
   const packFixture = (label, alter = () => {}) => {
     const output = join(root, label);
-    return packColdCandidate({ root, output, exec: (file, args) => {
+    return packColdCandidate({ root, output, exec: (file, args, options) => {
       if (file === "git") { assert.deepEqual(args, ["rev-parse", "HEAD"]); return source + "\n"; }
       if (file === "pnpm") {
         if (args[0] === "list") return JSON.stringify(rows);
@@ -68,7 +68,7 @@ try {
         return;
       }
       assert.equal(file, "tar"); archiveChildren++;
-      return execFileSync(file, args);
+      return execFileSync(file, args, options);
     } });
   };
   await check("cold candidate runs prepublish guards before packing", () => {
