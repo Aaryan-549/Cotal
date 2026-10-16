@@ -39,24 +39,25 @@ export class StartupConfirmMatcher {
   }
 }
 
-export interface StartupReply { prompt: string; key: "Down" | "Enter" }
+export interface StartupReply { prompt: string; key: "Down" | "Enter"; optional?: boolean }
 
 /** Mirrors core's screen-based startup sequence without introducing a seat-to-core dependency. */
 export class StartupConfirmSequence {
   readonly #final: string;
-  readonly #before: { prompt: string; key: "Down" | "Enter" }[];
+  readonly #before: { prompt: string; key: "Down" | "Enter"; optional: boolean }[];
   #step = 0;
-  #stable = false;
+  #seen: number | undefined;
   #done = false;
   constructor(prompt: string, before: readonly StartupReply[] = []) {
     this.#final = normalizeConfirmText(prompt);
     if (!this.#final) throw new Error("startup confirmation prompt is empty after ANSI and whitespace normalization");
     if (!Array.isArray(before) || before.length > 8) throw new Error("invalid startup choices");
     this.#before = before.map((reply) => {
-      if (!reply || typeof reply.prompt !== "string" || reply.prompt.length > 1024 || !["Down", "Enter"].includes(reply.key)) throw new Error("invalid startup choice");
+      if (!reply || typeof reply.prompt !== "string" || reply.prompt.length > 1024 || !["Down", "Enter"].includes(reply.key)
+        || (reply.optional !== undefined && typeof reply.optional !== "boolean")) throw new Error("invalid startup choice");
       const normalized = reply.prompt.split(/\r?\n/).map(normalizeConfirmText).filter(Boolean).join("\n");
       if (!normalized) throw new Error("startup choice prompt is empty after normalization");
-      return { prompt: normalized, key: reply.key };
+      return { prompt: normalized, key: reply.key, optional: reply.optional === true };
     });
   }
   observe(screen: string): { key: "Down" | "Enter"; done: boolean } | undefined {
@@ -66,17 +67,19 @@ export class StartupConfirmSequence {
       const expected = prompt.split("\n");
       return lines.some((_, start) => expected.every((line, offset) => lines[start + offset] === line));
     };
-    const step = this.#before[this.#step];
+    let index = this.#step;
+    while (this.#before[index]?.optional && !matches(this.#before[index].prompt)) index++;
+    const step = this.#before[index];
     if (!step || !matches(step.prompt)) {
-      this.#stable = false;
+      this.#seen = undefined;
       const final = this.#before.length ? matches(this.#final) : normalizeConfirmText(screen).includes(this.#final);
       if (!final) return undefined;
       this.#done = true;
       return { key: "Enter", done: true };
     }
-    if (!this.#stable) { this.#stable = true; return undefined; }
-    this.#step++;
-    this.#stable = false;
+    if (this.#seen !== index) { this.#seen = index; return undefined; }
+    this.#step = index + 1;
+    this.#seen = undefined;
     return { key: step.key, done: false };
   }
 }

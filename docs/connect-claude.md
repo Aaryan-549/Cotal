@@ -153,9 +153,11 @@ claude --strict-mcp-config --mcp-config '{"mcpServers":{"cotal":{…}}}' \
   stops the child as a graceful stop does, so a child that ignores SIGTERM is killed 3 seconds
   later. The other runtimes write the error to the manager's log.
 - **Trusted directory.** An authorized supervised spawn accepts the selected workspace through
-  Claude's native trust dialog. The runtime observes the default No choice, selects Yes, then
-  confirms only after seeing Yes selected. It sends each response once and stops watching after
-  the development-channel confirmation. A changed or unsupported dialog receives no guessed input
+  Claude's native trust dialog, which Claude draws in one of two layouts. When a numbered list
+  shows Yes first and selected, the runtime confirms it with Enter. When No comes first and is
+  selected, the runtime moves to Yes and confirms only after seeing Yes selected. It never confirms
+  while No is selected, sends each response once, and stops watching after the
+  development-channel confirmation. A changed or unsupported dialog receives no guessed input
   and still fails within the startup bound. Claude saves trust with its own repository and linked
   worktree rules; Cotal does not rewrite the manager's configuration. Accepting trust enables the
   workspace's hooks and settings, which can select a tool permission mode when no launch flag

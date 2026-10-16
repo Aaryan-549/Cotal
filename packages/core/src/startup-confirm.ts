@@ -15,25 +15,29 @@ function normalizeConfirmText(value: string): string {
 export interface StartupReply {
   prompt: string;
   key: "Down" | "Enter";
+  /** The choice may never appear, for example one of two layouts a harness draws a dialog in. While
+   * it is not on screen, the next choice can be answered instead, which skips this one for good. */
+  optional?: boolean;
 }
 
 /** The seat package repeats this small matcher because it has no core dependency. Both operate on
  * current screen snapshots, never scrollback accumulated from an earlier dialog. */
 export class StartupConfirmSequence {
   readonly #final: string;
-  readonly #before: { prompt: string; key: "Down" | "Enter" }[];
+  readonly #before: { prompt: string; key: "Down" | "Enter"; optional: boolean }[];
   #step = 0;
-  #stable = false;
+  #seen: number | undefined;
   #done = false;
   constructor(prompt: string, before: readonly StartupReply[] = []) {
     this.#final = normalizeConfirmText(prompt);
     if (!this.#final) throw new Error("startup confirmation prompt is empty after ANSI and whitespace normalization");
     if (!Array.isArray(before) || before.length > 8) throw new Error("invalid startup choices");
     this.#before = before.map((reply) => {
-      if (!reply || typeof reply.prompt !== "string" || reply.prompt.length > 1024 || !["Down", "Enter"].includes(reply.key)) throw new Error("invalid startup choice");
+      if (!reply || typeof reply.prompt !== "string" || reply.prompt.length > 1024 || !["Down", "Enter"].includes(reply.key)
+        || (reply.optional !== undefined && typeof reply.optional !== "boolean")) throw new Error("invalid startup choice");
       const normalized = reply.prompt.split(/\r?\n/).map(normalizeConfirmText).filter(Boolean).join("\n");
       if (!normalized) throw new Error("startup choice prompt is empty after normalization");
-      return { prompt: normalized, key: reply.key };
+      return { prompt: normalized, key: reply.key, optional: reply.optional === true };
     });
   }
   observe(screen: string): { key: "Down" | "Enter"; done: boolean } | undefined {
@@ -43,11 +47,15 @@ export class StartupConfirmSequence {
       const expected = prompt.split("\n");
       return lines.some((_, start) => expected.every((line, offset) => lines[start + offset] === line));
     };
-    const step = this.#before[this.#step];
+    // An optional choice that is not on screen does not block the choice after it. Answering a
+    // later choice passes over the optional ones before it for good.
+    let index = this.#step;
+    while (this.#before[index]?.optional && !matches(this.#before[index].prompt)) index++;
+    const step = this.#before[index];
     // Workspace paths can contain the warning text. Prefer a real menu over that text and match
     // whole visible lines, rather than a substring in the displayed path.
     if (!step || !matches(step.prompt)) {
-      this.#stable = false;
+      this.#seen = undefined;
       const final = this.#before.length ? matches(this.#final) : normalizeConfirmText(screen).includes(this.#final);
       if (!final) return undefined;
       this.#done = true;
@@ -55,9 +63,9 @@ export class StartupConfirmSequence {
     }
     // A partial first paint is not an interactive menu yet. Require the same choice on two
     // consecutive snapshots; a changed screen clears the observation instead of receiving a key.
-    if (!this.#stable) { this.#stable = true; return undefined; }
-    this.#step++;
-    this.#stable = false;
+    if (this.#seen !== index) { this.#seen = index; return undefined; }
+    this.#step = index + 1;
+    this.#seen = undefined;
     return { key: step.key, done: false };
   }
 }

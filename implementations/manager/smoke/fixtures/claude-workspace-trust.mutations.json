@@ -1,5 +1,7 @@
 {
-  "suite": ["implementations/manager/smoke/claude-workspace-trust.smoke.ts"],
+  "suite": [
+    "implementations/manager/smoke/claude-workspace-trust.smoke.ts"
+  ],
   "guard": "managed Claude workspace trust selects Yes before confirming, without changing tool permissions",
   "command": "pnpm --filter @cotal-ai/manager build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts --live",
   "completionMarker": "CLAUDE WORKSPACE TRUST NATIVE COMPLETE",
@@ -14,6 +16,94 @@
       "cell": "pty: native Claude accepts managed workspace trust automatically",
       "note": "Requires COTAL_TEST_CLAUDE_BINARY naming an installed Claude binary. The real native dialog exits on its default No choice; no model request or production credential is used.",
       "afterRestore": "pnpm --filter @cotal-ai/manager build"
+    },
+    {
+      "name": "drop the reply for the numbered Yes-first trust layout",
+      "file": "extensions/connector-claude-code/src/trust.ts",
+      "find": "  Object.freeze({ prompt: \"❯ 1. Yes, I trust this folder\\n2. No, exit\", key: \"Enter\" as const, optional: true }),\n",
+      "replace": "",
+      "expectRed": "core: real Claude 2.1.232 trust dialog gets one Enter on the selected Yes",
+      "cell": "core: real Claude 2.1.232 trust dialog gets one Enter on the selected Yes",
+      "command": "pnpm --filter @cotal-ai/connector-claude-code build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/connector-claude-code build"
+    },
+    {
+      "name": "answer the numbered trust layout while the cursor is on No, exit",
+      "file": "extensions/connector-claude-code/src/trust.ts",
+      "find": "\"❯ 1. Yes, I trust this folder\\n2. No, exit\"",
+      "replace": "\"1. Yes, I trust this folder\\n❯ 2. No, exit\"",
+      "expectRed": "core: numbered trust layout with the cursor on No, exit gets no key",
+      "cell": "core: numbered trust layout with the cursor on No, exit gets no key",
+      "command": "pnpm --filter @cotal-ai/connector-claude-code build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/connector-claude-code build"
+    },
+    {
+      "name": "core: an absent optional choice blocks the next one",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "    while (this.#before[index]?.optional && !matches(this.#before[index].prompt)) index++;\n",
+      "replace": "",
+      "expectRed": "core: real Claude 2.1.301 trust dialog gets Down, then Enter once Yes is selected",
+      "cell": "core: real Claude 2.1.301 trust dialog gets Down, then Enter once Yes is selected",
+      "command": "pnpm --filter @cotal-ai/core build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core build"
+    },
+    {
+      "name": "seat: an absent optional choice blocks the next one",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "    while (this.#before[index]?.optional && !matches(this.#before[index].prompt)) index++;\n",
+      "replace": "",
+      "expectRed": "seat: real Claude 2.1.301 trust dialog gets Down, then Enter once Yes is selected",
+      "cell": "seat: real Claude 2.1.301 trust dialog gets Down, then Enter once Yes is selected",
+      "command": "pnpm --filter @cotal-ai/seat build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat build"
+    },
+    {
+      "name": "core: accept a non-boolean optional flag",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "\n        || (reply.optional !== undefined && typeof reply.optional !== \"boolean\")",
+      "replace": "",
+      "expectRed": "core: malformed startup choices are refused",
+      "cell": "core: malformed startup choices are refused",
+      "command": "pnpm --filter @cotal-ai/core build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core build"
+    },
+    {
+      "name": "seat: accept a non-boolean optional flag",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "\n        || (reply.optional !== undefined && typeof reply.optional !== \"boolean\")",
+      "replace": "",
+      "expectRed": "seat: malformed startup choices are refused",
+      "cell": "seat: malformed startup choices are refused",
+      "command": "pnpm --filter @cotal-ai/seat build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat build"
+    },
+    {
+      "name": "core: answer a choice on its first snapshot",
+      "file": "packages/core/src/startup-confirm.ts",
+      "find": "    if (this.#seen !== index) { this.#seen = index; return undefined; }\n",
+      "replace": "",
+      "expectRed": "core: No-first trust layout gets Down, then Enter only once Yes is selected",
+      "cell": "core: No-first trust layout gets Down, then Enter only once Yes is selected",
+      "command": "pnpm --filter @cotal-ai/core build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/core build"
+    },
+    {
+      "name": "seat: answer a choice on its first snapshot",
+      "file": "packages/seat/src/startup-confirm.ts",
+      "find": "    if (this.#seen !== index) { this.#seen = index; return undefined; }\n",
+      "replace": "",
+      "expectRed": "seat: No-first trust layout gets Down, then Enter only once Yes is selected",
+      "cell": "seat: No-first trust layout gets Down, then Enter only once Yes is selected",
+      "command": "pnpm --filter @cotal-ai/seat build && pnpm exec tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts",
+      "completionMarker": "CLAUDE WORKSPACE TRUST CELLS COMPLETE",
+      "afterRestore": "pnpm --filter @cotal-ai/seat build"
     }
   ]
 }
