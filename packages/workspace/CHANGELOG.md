@@ -1,5 +1,14 @@
 # @cotal-ai/workspace
 
+## 0.84.0
+
+### Patch Changes
+
+- b4c8812: Treat a mesh record removed during a registry or keyed read as absent instead of reporting it as damaged. Keep named refusals for parse, shape and other read failures.
+- 9229264: Use the shared trust-entry check before loading a legacy stripped signer. Dangling and looping split-record links now refuse like other non-regular entries instead of being treated as absent.
+- Updated dependencies [6d48a0b]
+  - @cotal-ai/core@0.84.0
+
 ## 0.83.0
 
 ### Patch Changes
