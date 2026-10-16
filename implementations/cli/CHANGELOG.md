@@ -1,5 +1,13 @@
 # @cotal-ai/cli
 
+## 0.82.2
+
+### Patch Changes
+
+- 135ea80: Keep software updates independent of account catalogue refreshes, so an expired remote login cannot block update before its local manager continuity checks.
+  - @cotal-ai/core@0.82.2
+  - @cotal-ai/workspace@0.82.2
+
 ## 0.82.1
 
 ### Patch Changes
