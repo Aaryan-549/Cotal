@@ -11,7 +11,7 @@ export const sourceHashes = () => Object.fromEntries(sourceFiles.map((path) => [
 export const sdk = JSON.parse(readFileSync(join(root, "native/node-sdk.json"), "utf8"));
 
 /** Verify bytes and their native build receipt before reuse, assembly or publication. */
-export function verifyNative(arch, dir = join(root, "build/Release", `win32-${arch}`)) {
+export function verifyNative(arch, dir = join(root, "build/Release", `win32-${arch}`), expectedSource) {
   assert(arch === "x64" || arch === "arm64", `unsupported Windows native architecture: ${arch}`);
   const bytes = readFileSync(join(dir, "creation.node"));
   assert(bytes.length >= 64 && bytes.toString("ascii", 0, 2) === "MZ", "Windows identity binding is not a PE binary");
@@ -25,7 +25,13 @@ export function verifyNative(arch, dir = join(root, "build/Release", `win32-${ar
   assert.equal(receipt.arch, arch);
   assert.equal(receipt.nodeApi, 8);
   assert.match(receipt.source, /^[a-f0-9]{40}$/);
+  if (expectedSource !== undefined) assert.equal(receipt.source, expectedSource, "Windows identity native checkout provenance mismatch");
   assert.deepEqual(receipt.sourceHashes, sourceHashes(), "Windows identity native source provenance mismatch");
+  assert.equal(receipt.nodeHeaders, sdk.version);
+  assert.equal(typeof receipt.compiler, "string");
+  assert(receipt.compiler.length > 0);
+  assert.equal(typeof receipt.windowsSdk, "string");
+  assert(receipt.windowsSdk.length > 0);
   assert.equal(receipt.headersSha256, sdk.headers);
   assert.equal(receipt.librarySha256, sdk.libraries[arch]);
   assert.equal(receipt.sha256, sha256(bytes), "Windows identity binary hash mismatch");

@@ -6,6 +6,9 @@ on:
       - packages/workspace/src/win32-process.ts
       - packages/workspace/native/**
       - packages/workspace/scripts/**
+      - packages/workspace/package.json
+      - packages/workspace/smoke/fixtures/win32-denied-process.c
+      - scripts/workspace-assemble-natives.mjs
       - packages/workspace/smoke/pid-identity.smoke.ts
       - packages/workspace/smoke/win32-creation-native.smoke.ts
       - bin/smoke/mutations/pid-identity.json
@@ -47,10 +50,18 @@ jobs:
           call "%VS%\Common7\Tools\VsDevCmd.bat" -no_logo -arch=${{ matrix.compiler }} -host_arch=${{ matrix.compiler }}
           if errorlevel 1 exit /b 1
           node packages/workspace/scripts/build-native.mjs
+          if errorlevel 1 exit /b 1
+          mkdir packages\workspace\build\test\win32-${{ matrix.arch }}
+          cl /nologo /O2 /MT /W4 /WX /std:c11 /Fopackages\workspace\build\test\win32-${{ matrix.arch }}\query-control.obj /Fepackages\workspace\build\test\win32-${{ matrix.arch }}\query-control.exe packages\workspace\smoke\fixtures\win32-denied-process.c /link /Brepro advapi32.lib
       - uses: actions/upload-artifact@v4
         with:
           name: windows-identity-native-${{ matrix.arch }}
           path: packages/workspace/build/Release/win32-${{ matrix.arch }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-identity-tests-${{ matrix.arch }}
+          path: packages/workspace/build/test/win32-${{ matrix.arch }}/query-control.exe
           if-no-files-found: error
 
   native:
@@ -72,6 +83,10 @@ jobs:
         with:
           name: windows-identity-native-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
           path: packages/workspace/build/Release/win32-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-identity-tests-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: packages/workspace/build/test/win32-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cotal-ai/core --filter @cotal-ai/workspace build
       - run: pnpm --filter @cotal-ai/workspace typecheck
