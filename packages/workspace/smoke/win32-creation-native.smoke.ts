@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { nativeWin32CreationToken } from "../src/win32-process.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,9 +59,18 @@ try {
         else if (output.length > 32) done(new Error("invalid query-denied fixture output"));
       });
     });
-    const denied = spawnSync(fixture, ["--probe", String(target.pid)], { encoding: "utf8", timeout: 5000 });
-    check("W6 an independently verified query denial stays unverified",
-      denied.status === 0 && denied.stdout.trim() === "denied" && nativeWin32CreationToken(target.pid!) === undefined);
+    const control = createRequire(import.meta.url)(join(workspace, "build", "test", `win32-${process.arch}`, "query-denied.node")) as {
+      readDenied: (pid: number, read: () => string | undefined) => string | undefined;
+    };
+    let calls = 0;
+    const read = () => { calls++; return nativeWin32CreationToken(target.pid!); };
+    const denied = control.readDenied(target.pid!, read);
+    check("W6 an independently verified query denial stays unverified", denied === undefined && calls === 1);
+    const thrown = new Error("test reader failure");
+    assert.throws(() => control.readDenied(target.pid!, () => { throw thrown; }), (error) => error === thrown);
+    const deniedAgain = control.readDenied(target.pid!, read);
+    check("W12 query-denial control restores thread identity after success and exception",
+      deniedAgain === undefined && calls === 2 && defaultStartToken(process.pid) === token);
   } finally {
     target.stdin.end();
     const killer = setTimeout(() => target.kill("SIGKILL"), 5000);
@@ -92,7 +102,7 @@ try {
     `[System.Diagnostics.Process]::GetProcessById(${process.pid}).HandleCount`],
     { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 }).trim();
   check("W11 repeated native identity reads do not retain process handles", /^\d+$/.test(handlesAfter) && Number(handlesAfter) - Number(reference[1]) <= 16);
-  console.log("WINDOWS COLD CREATION OK (11 checks; native Windows only)");
+  console.log("WINDOWS COLD CREATION OK (12 checks; native Windows only)");
 } finally {
   for (const key of Object.keys(process.env)) delete process.env[key];
   Object.assign(process.env, before);

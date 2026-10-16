@@ -10,7 +10,7 @@ if (process.platform !== "win32") process.exit(0);
 const arch = process.arch;
 assert(arch === "x64" || arch === "arm64", `unsupported Windows native architecture: ${arch}`);
 const dest = join(root, "build/Release", `win32-${arch}`);
-if (existsSync(join(dest, "creation.node")) && existsSync(join(dest, "build.json"))) {
+if (existsSync(join(dest, "creation.node")) || existsSync(join(dest, "build.json"))) {
   // A verified prebuilt needs no compiler. Stale or damaged artifacts are not silently rebuilt.
   verifyNative(arch, dest);
   process.exit(0);
@@ -41,6 +41,13 @@ try {
   execFileSync("cl.exe", ["/nologo", "/LD", "/O2", "/MT", "/W4", "/WX", "/std:c11",
     `/I${include}`, `/Fo${join(buildDir, "creation.obj")}`, join(root, "native/win32-process.c"),
     "/link", "/Brepro", `/OUT:${output}`, library, "kernel32.lib"], { cwd: buildDir, stdio: "inherit" });
+  if (process.argv.includes("--test-controls")) {
+    const testDir = join(root, "build/test", `win32-${arch}`);
+    mkdirSync(testDir, { recursive: true });
+    execFileSync("cl.exe", ["/nologo", "/LD", "/O2", "/MT", "/W4", "/WX", "/std:c11",
+      `/I${include}`, `/Fo${join(buildDir, "query-denied.obj")}`, join(root, "smoke/fixtures/win32-query-denied.c"),
+      "/link", "/Brepro", `/OUT:${join(testDir, "query-denied.node")}`, library, "advapi32.lib"], { cwd: buildDir, stdio: "inherit" });
+  }
   const bytes = readFileSync(output);
   const receipt = { version: 1, platform: "win32", arch, nodeApi: 8,
     source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
