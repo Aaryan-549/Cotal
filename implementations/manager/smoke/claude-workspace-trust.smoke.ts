@@ -47,8 +47,8 @@ const edit = (text: string, find: string, replace: string): string => {
 // Raw Claude Code output captured in a pty before any key: 2.1.232 at 80 columns, 2.1.301 at 120.
 // Only the user name in each trust dialog's path is renamed, to one of the same length.
 const CLAUDE_TRUST = fixture("claude-2.1.232-trust.bin");
-const CLAUDE_TRUST_PATH = /\/[^\x1b\r\n]+/.exec(CLAUDE_TRUST)?.[0];
-assert.ok(CLAUDE_TRUST_PATH, "captured trust dialog has a workspace path");
+const CLAUDE_TRUST_PATH = /\/[^\x1b\r\n]+/.exec(CLAUDE_TRUST)?.[0]
+  ?? assert.fail("captured trust dialog has no workspace path");
 const CLAUDE_CHANNELS = fixture("claude-2.1.232-devchannels.bin");
 const CLAUDE_TRUST_NO_FIRST = fixture("claude-2.1.301-trust.bin");
 // Claude 2.1.301 under a Team org without channelsEnabled: no channel warning, straight to the input
