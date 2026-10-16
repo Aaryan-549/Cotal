@@ -119,66 +119,66 @@
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     },
     {
-      "name": "M11 the Windows reader uses management cmdlet discovery again",
+      "name": "M11 the Windows reader stops reaching its native binding",
       "file": "packages/workspace/src/pid.ts",
-      "find": "          `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().ToFileTimeUtc()`,",
-      "replace": "          `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToFileTimeUtc()`,",
-      "expectRed": "F7 win32 creation asks the native Process API without a cmdlet",
-      "cell": "F7 win32 creation asks the native Process API without a cmdlet",
+      "find": "  const out = read(pid);",
+      "replace": "  const out = undefined;",
+      "expectRed": "F7 win32 creation preserves every FILETIME digit through its reader",
+      "cell": "F7 win32 creation preserves every FILETIME digit through its reader",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     },
     {
-      "name": "M12 the Windows reader cuts off a measured cold runtime start",
+      "name": "M12 invalid Windows pids reach the native binding",
       "file": "packages/workspace/src/pid.ts",
-      "find": "  for (const timeout of [10_000, 5_000]) {",
-      "replace": "  for (const timeout of [5_000, 5_000]) {",
-      "expectRed": "F8 win32 creation allows a bounded ten-second cold runtime start",
-      "cell": "F8 win32 creation allows a bounded ten-second cold runtime start",
-      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
-    },
-    {
-      "name": "M13 a timed-out Windows read is never retried",
-      "file": "packages/workspace/src/pid.ts",
-      "find": "  for (const timeout of [10_000, 5_000]) {",
-      "replace": "  for (const timeout of [10_000]) {",
-      "expectRed": "F9 win32 creation retries a timeout once with a five-second bound",
-      "cell": "F9 win32 creation retries a timeout once with a five-second bound",
-      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
-    },
-    {
-      "name": "M14 the Windows reader retries non-timeout failures",
-      "file": "packages/workspace/src/pid.ts",
-      "find": "      if ((error as NodeJS.ErrnoException).code !== \"ETIMEDOUT\") return undefined;\n",
+      "find": "  if (!Number.isInteger(pid) || pid <= 0 || pid > 0x7fffffff) return undefined;",
       "replace": "",
-      "expectRed": "F10 win32 creation does not retry a non-timeout failure",
-      "cell": "F10 win32 creation does not retry a non-timeout failure",
+      "expectRed": "F8 invalid Windows pids never reach the native reader",
+      "cell": "F8 invalid Windows pids never reach the native reader",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     },
     {
-      "name": "M15 the Windows reader exceeds two attempts",
+      "name": "M13 Windows creation FILETIME is rounded through Number",
       "file": "packages/workspace/src/pid.ts",
-      "find": "  for (const timeout of [10_000, 5_000]) {",
-      "replace": "  for (const timeout of [10_000, 5_000, 5_000]) {",
-      "expectRed": "F11 win32 creation refuses after the second timeout",
-      "cell": "F11 win32 creation refuses after the second timeout",
+      "find": "  const out = read(pid);",
+      "replace": "  const raw = read(pid);\n  const out = raw === undefined ? undefined : String(Number(raw));",
+      "expectRed": "F7 win32 creation preserves every FILETIME digit through its reader",
+      "cell": "F7 win32 creation preserves every FILETIME digit through its reader",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     },
     {
-      "name": "M16 the Windows retry exceeds five seconds",
+      "name": "M14 a broken Windows binding is silently treated as an unreadable pid",
       "file": "packages/workspace/src/pid.ts",
-      "find": "  for (const timeout of [10_000, 5_000]) {",
-      "replace": "  for (const timeout of [10_000, 10_000]) {",
-      "expectRed": "F9 win32 creation retries a timeout once with a five-second bound",
-      "cell": "F9 win32 creation retries a timeout once with a five-second bound",
+      "find": "  const out = read(pid);",
+      "replace": "  let out: string | undefined;\n  try { out = read(pid); } catch { return undefined; }",
+      "expectRed": "F10 a broken Windows binding throws without retry",
+      "cell": "F10 a broken Windows binding throws without retry",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     },
     {
-      "name": "M17 the Windows reader retries malformed successful output",
+      "name": "M15 an unavailable Windows identity is retried",
       "file": "packages/workspace/src/pid.ts",
-      "find": "      return parseWin32CreationToken(out);",
-      "replace": "      const token = parseWin32CreationToken(out);\n      if (token !== undefined) return token;",
-      "expectRed": "F12 win32 creation refuses malformed output without a retry",
-      "cell": "F12 win32 creation refuses malformed output without a retry",
+      "find": "  const out = read(pid);",
+      "replace": "  const out = read(pid) ?? read(pid);",
+      "expectRed": "F9 an unavailable Windows identity stays unverified without retry",
+      "cell": "F9 an unavailable Windows identity stays unverified without retry",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M16 oversized Windows pids reach the native binding",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  if (!Number.isInteger(pid) || pid <= 0 || pid > 0x7fffffff) return undefined;",
+      "replace": "  if (!Number.isInteger(pid) || pid <= 0) return undefined;",
+      "expectRed": "F12 an oversized Windows pid never reaches the native reader",
+      "cell": "F12 an oversized Windows pid never reaches the native reader",
+      "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
+    },
+    {
+      "name": "M17 malformed Windows native output becomes a pin token",
+      "file": "packages/workspace/src/pid.ts",
+      "find": "  return typeof out === \"string\" ? parseWin32CreationToken(out) : undefined;",
+      "replace": "  return out;",
+      "expectRed": "F11 malformed Windows native output is not a token",
+      "cell": "F11 malformed Windows native output is not a token",
       "afterRestore": "pnpm --filter @cotal-ai/workspace build > /dev/null"
     }
   ]

@@ -26,8 +26,7 @@
  * Run: pnpm smoke:pid-identity
  */
 import { strict as assert } from "node:assert";
-import childProcess, { spawn } from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -271,46 +270,30 @@ try {
     check("F6 a live record with no sibling pin is still legacy (upgrade path only)",
       verifyIdentityPin(legacyPath, () => win32Token).kind === "legacy");
     reap(liveLegacy.child);
-    // This guards command construction only; the native Windows cold suite executes the OS read.
-    const originalExec = childProcess.execFileSync;
-    let nativeQuery = false;
-    const nativeTimeouts: unknown[] = [];
-    let mode = "success";
-    childProcess.execFileSync = ((file: unknown, args: unknown, ...rest: unknown[]) => {
-      if (file === "powershell.exe") {
-        nativeQuery = Array.isArray(args) && args[3] === "[System.Diagnostics.Process]::GetProcessById(4242).StartTime.ToUniversalTime().ToFileTimeUtc()";
-        nativeTimeouts.push((rest[0] as { timeout?: unknown } | undefined)?.timeout);
-        if (mode === "denied" || mode === "timeout" || (mode === "timeout-once" && nativeTimeouts.length === 1))
-          throw Object.assign(new Error("synthetic native query failure"), { code: mode === "denied" ? "EACCES" : "ETIMEDOUT" });
-        return mode === "malformed" ? "not-a-filetime" : win32Token;
-      }
-      return Reflect.apply(originalExec, childProcess, [file, args, ...rest]);
-    }) as typeof originalExec;
-    syncBuiltinESMExports();
-    try {
-      const token = win32ProcessCreationToken(4242);
-      check("F7 win32 creation asks the native Process API without a cmdlet", token === win32Token && nativeQuery);
-      check("F8 win32 creation allows a bounded ten-second cold runtime start", nativeTimeouts[0] === 10_000);
-      mode = "timeout-once";
-      nativeTimeouts.length = 0;
-      const retried = win32ProcessCreationToken(4242);
-      check("F9 win32 creation retries a timeout once with a five-second bound", retried === win32Token && nativeTimeouts.length === 2 && nativeTimeouts[0] === 10_000 && nativeTimeouts[1] === 5000);
-      mode = "denied";
-      nativeTimeouts.length = 0;
-      const denied = win32ProcessCreationToken(4242);
-      check("F10 win32 creation does not retry a non-timeout failure", denied === undefined && nativeTimeouts.length === 1);
-      mode = "timeout";
-      nativeTimeouts.length = 0;
-      const timedOut = win32ProcessCreationToken(4242);
-      check("F11 win32 creation refuses after the second timeout", timedOut === undefined && nativeTimeouts.length === 2);
-      mode = "malformed";
-      nativeTimeouts.length = 0;
-      const malformed = win32ProcessCreationToken(4242);
-      check("F12 win32 creation refuses malformed output without a retry", malformed === undefined && nativeTimeouts.length === 1);
-    } finally {
-      childProcess.execFileSync = originalExec;
-      syncBuiltinESMExports();
-    }
+    // These controls exercise the reader boundary. The native suite reaches GetProcessTimes.
+    const exact = "133000000000000001";
+    let calledPid: number | undefined;
+    check("F7 win32 creation preserves every FILETIME digit through its reader",
+      win32ProcessCreationToken(4242, (pid) => { calledPid = pid; return exact; }) === exact && calledPid === 4242);
+    let calls = 0;
+    const counted = (): undefined => { calls++; return undefined; };
+    const invalid = [0, -1, 1.5, NaN, Infinity].map((pid) => win32ProcessCreationToken(pid, counted));
+    check("F8 invalid Windows pids never reach the native reader", invalid.every((token) => token === undefined) && calls === 0);
+    calls = 0;
+    const denied = win32ProcessCreationToken(4242, counted);
+    check("F9 an unavailable Windows identity stays unverified without retry", denied === undefined && calls === 1);
+    calls = 0;
+    const missing = new Error("synthetic missing native binding");
+    let failure: unknown;
+    try { win32ProcessCreationToken(4242, () => { calls++; throw missing; }); }
+    catch (error) { failure = error; }
+    check("F10 a broken Windows binding throws without retry", failure === missing && calls === 1);
+    calls = 0;
+    const malformed = win32ProcessCreationToken(4242, () => { calls++; return "not-a-filetime"; });
+    check("F11 malformed Windows native output is not a token", malformed === undefined && calls === 1);
+    calls = 0;
+    const oversized = win32ProcessCreationToken(0x80000000, counted);
+    check("F12 an oversized Windows pid never reaches the native reader", oversized === undefined && calls === 0);
   }
 
   // ── G. writePidPair (#1238): the WRITE side has no cell today; a crash mid-publish is planted
