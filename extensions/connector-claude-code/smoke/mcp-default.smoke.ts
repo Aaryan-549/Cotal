@@ -16,6 +16,7 @@ mkdirSync(profile); mkdirSync(cwd);
 const osHome = join(root, "os-home"); mkdirSync(osHome);
 const values = {
   HOME: osHome,
+  USERPROFILE: osHome,
   CLAUDE_CONFIG_DIR: profile,
   ENABLE_CLAUDEAI_MCP_SERVERS: "false",
   ENABLE_TOOL_SEARCH: "auto:5",
