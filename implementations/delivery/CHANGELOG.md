@@ -1,5 +1,16 @@
 # @cotal-ai/delivery
 
+## 0.82.1
+
+### Patch Changes
+
+- b526a5e: Stop local Windows managers and delivery daemons through an authenticated process-bound cleanup request, so immediate restart can acquire leases released by the previous generation. Keep identity checks, stop reservations and the existing one-shot agent-reap policy. Refuse older Windows daemons without this capability instead of force-terminating them without cleanup.
+- Updated dependencies [9061234]
+- Updated dependencies [423d250]
+- Updated dependencies [b526a5e]
+  - @cotal-ai/workspace@0.82.1
+  - @cotal-ai/core@0.82.1
+
 ## 0.82.0
 
 ### Patch Changes
