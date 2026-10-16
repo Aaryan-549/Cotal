@@ -48,6 +48,30 @@ while adopting the matched packages; use the runtime's supported manager custody
 path. Any interruption is that manager transition, not a change to the broker wire contract.
 Carried private homes stay isolated and do not import the operator's native profile.
 
+## Connector-store protection after 0.82.2
+
+Snapshot the private Cotal state, connector store and mesh configuration before upgrading.
+Install the new CLI on each CLI and manager host, then verify the selected executable before
+running setup or store maintenance. The POSIX installer prints its absolute launcher because
+it cannot change the parent shell's command cache, aliases or functions. An older executable
+already on disk remains unsafe for a newer store; do not use its force advice to recover.
+
+Forward setup and connector seeding migrate built-ins automatically. Same-generation force and
+reset rebuilds remain supported. An executable older than the store now refuses every backward
+migration, including force and reset. Select a verified executable at least as new as the store
+and run normal seeding instead. No credential or mesh-record format needs manual migration.
+
+A split deployment needs no broker restart for this change. Keep each host's CLI and connectors
+on the same release. Pause new managed spawns while adopting it; a running manager keeps its
+loaded code until restarted. Use the chosen runtime's supported custody or preserve-state path.
+The interruption covers that manager transition and depends on its runtime, not a broker outage.
+Do not overwrite a live manager installation or stop an unidentified listener to force adoption.
+
+An implicit foreground spawn now chooses a numbered actor when the requested actor is occupied.
+Existing grants, launch material and sessions stay in place. An explicit name remains pinned
+and refuses an occupied actor rather than renaming it. Signed enrollments and managed handoffs
+keep their existing identity semantics.
+
 ## Managed Claude workspace trust in 0.80.0
 
 Before upgrading, snapshot the manager's private Cotal state and Claude configuration home.

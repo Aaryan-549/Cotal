@@ -243,9 +243,8 @@ async function runUnderLocks(mode: Mode, generation: string, nonce: string): Pro
   // a 0.16.0 build against the same home. A READ command, not a seed. The stamp went 0.18.0 -> 0.16.0
   // with the 213 payload files byte-identical, and the next 0.18.0 command re-added all six connectors.
   //
-  // `reset` and `force` are the operator saying "rebuild this store for the version I am running",
-  // which is the supported way down. Everything else refuses loudly and writes nothing. This sits
-  // BEFORE the maintenance quarantine below so an older `--repair` cannot move files aside either.
+  // Every mode refuses a backward migration, including force/reset. A shadowed older executable
+  // must not replace a newer machine-wide generation. Check before any maintenance quarantine.
   let storeGeneration: string | undefined;
   try {
     storeGeneration = readStamp()?.generation;
@@ -253,8 +252,6 @@ async function runUnderLocks(mode: Mode, generation: string, nonce: string): Pro
     storeGeneration = undefined; // corrupt JSON: the maintenance path below quarantines it
   }
   if (
-    mode !== "reset" &&
-    mode !== "force" &&
     storeGeneration !== undefined &&
     isValidSemver(storeGeneration) &&
     isStrictlyNewer(storeGeneration, generation)
@@ -268,7 +265,7 @@ async function runUnderLocks(mode: Mode, generation: string, nonce: string): Pro
     const stampProvenance = describeStampProvenance(readStamp());
     throw new Error(
       `this cotal ${generation} is older than the seed store's generation ${storeGeneration}${stampProvenance} - ` +
-        `${recovery}, or \`cotal ext seed --force\` to rebuild the store for this version`,
+        `${recovery}; this executable will not downgrade the shared connector store`,
     );
   }
 

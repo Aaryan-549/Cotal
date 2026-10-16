@@ -17,7 +17,7 @@ import { isLoopbackLiteral, registry, type AuthPrepareInput, type AuthPrepared, 
 import { assertUserAuthInfo, findMesh, homeCotalDir, probeLiveness, spaceSegment, type UserAuthInfo } from "@cotal-ai/workspace";
 import { readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { acquireLock } from "@cotal-ai/core";
+import { acquireLock, AgentGrantConflictError } from "@cotal-ai/core";
 import { deleteIdpSpaceCatalog, fetchIdpJwt, hasIdpSessions, hasIdpSpaceCatalog, loadIdpSession, prepareIdpSpaceCatalogs, probeIdpJwks, requireIdpSession } from "./login.js";
 import { deriveOwnerForIdpSubject } from "./derive.js";
 import { findActorUnified, findInteractiveActor, grantManagedActor, hashActorToken, newActorToken, revokeManagedActor, revokeManagedActorAt } from "./ledger.js";
@@ -450,7 +450,7 @@ export const cotalAuthProvider: AuthProvider = {
     const claim = acquireLock(join(dir, "managed-grant.lock"), { label: "managed grant mutation" });
     try {
       if (fresh && findActorUnified(dir, owner, actor) !== undefined)
-        throw new Error(`actor "${actor}" already has a grant; no grant was replaced`);
+        throw new AgentGrantConflictError(actor);
       const { actorToken, tokenHash } = newActorToken();
       grantManagedActor(dir, {
         owner,

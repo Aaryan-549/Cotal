@@ -17,6 +17,14 @@ cotal --version           # cotal-ai version + each installed extension's (also 
 cotal <command> --help    # one command's flags and usage
 ```
 
+The shell installer prints its absolute launcher path. Use it when an older installation still
+wins plain `cotal`. Having `~/.local/bin` somewhere on PATH does not establish precedence, and a
+child installer cannot change the parent shell's command cache, aliases or functions. Inspect
+`type -a cotal` in that shell. After putting the new directory first, refresh its command cache
+with `hash -r` (or `rehash` in zsh). An alias or function must be corrected separately. To restore
+connectors after an old executable rebuilt them, run the verified newer absolute executable with
+`ext seed`, without `--force`.
+
 `npx cotal-ai <command>` runs it without a global install. Bare `cotal` prints help. Every command
 generates its own `--help`, usage, and shell completion from its declared flags.
 
@@ -1049,6 +1057,13 @@ in a stored row's field name, prints as its `\uXXXX` escape.
 cotal spawn [<persona>] [--detach] [--name <n>] [--agent <a>] [--model <m>] [--variant <v>] [--prompt <text>] [--cwd <dir>]
 cotal spawn -f <cotal.yaml> [--dry-run]
 ```
+
+On a user-auth mesh, an ordinary foreground spawn without `--name` allocates the first free actor
+in the persona's series: `default_agent`, `default_agent_2`, `default_agent_3`, and so on. Held
+local material and existing grants are occupied, even when no presence is visible. Allocation
+preserves the existing session and its credentials. An explicit `--name`, a signed enrollment,
+and a managed handoff pin an identity and refuse a collision instead of renaming it. Authorization,
+network and malformed-provisioning failures are not reasons to try another name.
 
 For a foreground spawn onto a remote user-auth mesh, a launcher may supply a one-time enrollment
 instead of a cached human login. Prefer a private file:
@@ -2471,7 +2486,7 @@ so the command that triggered the seed keeps stdout to itself:
 | (none) | Reconcile: seed any never-seeded built-in, refresh a seeded one whose version the binary bumped, leave a removed one removed. A no-op once current. |
 | `--repair` | Recover after an interrupted seed or a lost authority (rebuilds the interrupted connector; restores the removed-vs-never-seeded record from its durable backup). Also reinstalls a seeded built-in whose entry file is gone or whose `package.json` is not JSON or has no `version`. |
 | `--reset` | Discard the record and re-seed all seven built-ins (the six connectors plus the web dashboard). **Resurrects any you removed.** Rebuilds cleanly over corrupt seed state. |
-| `--force` | Re-seed the built-ins even when the version stamp is current or a downgrade. |
+| `--force` | Re-seed the built-ins even when the version stamp is current. Refuses to downgrade a newer shared store. |
 
 When a newer `cotal` advances the operator-global seed store to its generation, it prints one
 migration line naming the old and new generations, the exact CLI entry that wrote the store, the
@@ -2482,9 +2497,11 @@ Legacy generation-only stamps remain readable; their refusal simply has no write
 An older `cotal` refuses a seed store written by a newer version. When it can verify a sufficient
 `cotal` executable on PATH or at the installer's `~/.local/bin/cotal` location, the refusal names
 that absolute path so a reduced service PATH does not select the older binary again. Otherwise it
-keeps the generic newer-version instruction. `--force` rebuilds the store for the running older
-version without discarding the ever-seeded authority. `--reset` still exists for corrupt state and
-resurrects deliberately-removed connectors.
+keeps the generic newer-version instruction. Every maintenance mode, including `--force` and
+`--reset`, refuses to replace a newer shared generation. Run the newer executable instead.
+Same-generation force remains supported. Reset still repairs corrupt state and resurrects
+removed connectors. Older released executables may still allow a backward rebuild; do not use
+their force advice to recover from selecting the wrong installation.
 
 A source-checkout CLI (`pnpm cotal`, `tsx bin/cotal.ts`, `node bin/cotal.ts`, or a suite child of
 those) refuses to write or garbage-collect that store. The refusal names the path, the generation
