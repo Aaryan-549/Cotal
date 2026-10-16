@@ -75,6 +75,7 @@ const baseCommands: Command[] = [
     group: "Setup",
     summary: "reconcile first-party extensions and check for a coherent cotal-ai upgrade",
     flags: updateFlags,
+    prepareMeshTarget: false,
     run: update,
   },
   {

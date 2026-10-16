@@ -728,4 +728,71 @@ async function completionOut(positionals: string[]): Promise<string> {
   }
 }
 
+// Exercise the registered update metadata through the real dispatcher. Only run is replaced:
+// the observer avoids npm mutations; full-updater behavior is covered by terminal replays.
+{
+  const { Registry } = await import("@cotal-ai/core");
+  const { recordMesh, setCurrent, getCurrent } = await import("@cotal-ai/workspace");
+  const { runCli } = await import("../src/command.js");
+  const { prepareCatalogCommand } = await import("../src/commands/sync.js");
+  const home = mkdtempSync(join(tmpdir(), "cotal-update-catalog-"));
+  const priorHome = process.env.COTAL_HOME;
+  const idp = "https://expired.example/api/auth";
+  let catalogCalls = 0;
+  const provider: Pick<import("@cotal-ai/core").AuthProvider, "kind" | "name" | "prepareSpaceCatalogs"> = {
+    kind: "auth-provider",
+    name: "update-catalog-smoke",
+    async prepareSpaceCatalogs() {
+      catalogCalls++;
+      return [{
+        account: { idpUrl: idp, issuer: "https://expired.example", sub: "fixture", ownerKey: "fixture", catalogUrl: "https://expired.example/spaces" },
+        state: "failed",
+        error: "fixture catalog refused: HTTP 401",
+      }];
+    },
+  };
+  process.env.COTAL_HOME = home;
+  registry.register(provider);
+  try {
+    recordMesh({
+      space: "expired", server: "nats://127.0.0.1:1", root: home, mode: "user", origin: "catalog", catalogOwner: "fixture",
+      userAuth: { provider: "cotal", idp: { url: idp, issuer: "https://expired.example", audience: "fixture" }, remote: true, sentinelCredsPath: join(home, "sentinel.creds") },
+      ts: new Date(0).toISOString(),
+    });
+    setCurrent("expired");
+    await assert.rejects(prepareCatalogCommand({ positionals: [], values: {}, raw: [] }), /fixture catalog refused: HTTP 401/);
+    assert.equal(catalogCalls, 1, "the expired selected account is a live catalogue-gate control");
+    const registered = registry.resolve<Command>("command", "update");
+    for (const flags of [[], ["--self"], ["--space", "expired"], ["--self", "--space", "expired", "--server", "nats://127.0.0.1:1", "--creds", join(home, "fixture.creds")]]) {
+      catalogCalls = 0;
+      let entered = false;
+      let exitCode: number | undefined;
+      const stopped = new Error("fixture process.exit");
+      const exit = process.exit;
+      const probe = new Registry();
+      probe.register({ ...registered, async run(args) {
+        entered = true;
+        assert.deepEqual(args.raw, flags, "update keeps its parsed selector and self flags");
+      } } as Command);
+      process.exit = ((code?: number) => { exitCode = code ?? 0; throw stopped; }) as never;
+      try {
+        await runCli(probe, ["update", ...flags]);
+      } catch (error) {
+        if (error !== stopped) throw error;
+      } finally {
+        process.exit = exit;
+      }
+      assert.equal(exitCode, undefined, "update dispatch reaches its own continuity checks without catalogue authentication");
+      assert.equal(entered, true, "update invokes its own command after parsing");
+      assert.equal(catalogCalls, 0, "update dispatch does not refresh account catalogues");
+      assert.equal(getCurrent(), "expired", "update dispatch preserves the recorded mesh selection");
+    }
+  } finally {
+    registry.unregister("auth-provider", provider.name);
+    if (priorHome === undefined) delete process.env.COTAL_HOME;
+    else process.env.COTAL_HOME = priorHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
 console.log("✓ command-kernel smoke passed");
