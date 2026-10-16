@@ -1,5 +1,17 @@
 # @cotal-ai/cli
 
+## 0.83.0
+
+### Minor Changes
+
+- d663fa4: Allocate a fresh numbered actor for implicit foreground user-auth launches without replacing an existing session or grant. Preserve explicit names, enrollments and managed handoffs, and retry only typed name collisions. Refuse backward connector-store migration even with force or reset, remove unsafe downgrade advice, and make the shell installer identify PATH shadowing and use its absolute installed launcher in next steps.
+
+### Patch Changes
+
+- Updated dependencies [d663fa4]
+  - @cotal-ai/core@0.83.0
+  - @cotal-ai/workspace@0.83.0
+
 ## 0.82.2
 
 ### Patch Changes
