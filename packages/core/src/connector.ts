@@ -118,14 +118,17 @@ export interface LaunchOpts {
   eventsRequired?: boolean;
   /** Operator MCP servers to SHARE with this agent, resolved from the cotal config by the caller
    *  (see {@link connectorServers}). Keyed by server name, `.mcp.json`-shaped, with `${VAR}`
-   *  secret refs intact. A connector renders them into its own host format; the default is none
-   *  (Claude launches isolated with `--strict-mcp-config`). Connectors that don't support sharing
-   *  throw on a non-empty map rather than silently dropping it. */
+   *  secret refs intact. A connector renders them into its own host format. Host-native discovery
+   *  remains the connector's default unless the caller requests an exclusive selection.
+   *  Connectors that don't support sharing throw on a non-empty map. */
   mcpServers?: Record<string, McpServerSpec>;
+  /** The caller explicitly narrowed MCP sharing, including an empty selection. A connector with
+   *  native discovery uses this intent to retain its host's per-spawn isolation policy. */
+  mcpServersExclusive?: boolean;
   /** Extra environment names an operator deliberately declared in `spawn.env`, resolved by the
    *  caller exactly as {@link mcpServers} is. The default supplies no extras: the child receives the
    *  fixed OS allow-list, the machine-wide `COTAL_*` operator knobs, and connector-declared inputs
-   *  only. Connectors never read config themselves. Host-session markers are not forwarded unless
+   *  only. Connectors never read Cotal config themselves. Host-session markers are not forwarded unless
    *  named here. */
   envAllow?: readonly string[];
   /** Absolute harness executable paths resolved by the manager during boot, keyed by the connector's

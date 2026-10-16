@@ -27,12 +27,15 @@ agents it spawns, optional `spawn.env` names that deliberately add environment c
 spawned agent (see [Environment variables](#environment-variables) below), and an optional
 `modelPolicy` that limits which models a role may launch on (see [Model policy](#model-policy)).
 
-The sharing half: the Claude connector launches with `--strict-mcp-config`, dropping every ambient
-MCP server, so a spawned agent gets only the servers this file lists, and none with no list. On its
-first run `cotal setup` writes the `claude` list from your own Claude Code user-scope servers, leaving
-out a malformed entry and any with an `env` or `headers` value that is anything but `${VAR}`
-references, and keeps a list the file already declares.
-Every shared server boots once per spawn, so remove the heavy ones for a lighter seat.
+Claude Code loads its native user, local, project, plugin and connected-account MCP sources by
+default, alongside Cotal and this file's declared sharing overrides. Claude retains its approval,
+disabled-server and managed-policy rules. An empty Cotal sharing map does not disable native
+sources. Use `--share-tools none` for Cotal alone, or name declared servers to restrict one spawn.
+Carried sessions retain their private home's isolated MCP configuration.
+
+On its first run `cotal setup` still seeds eligible user-scope declarations into this file and
+keeps an existing list. Native discovery does not depend on that snapshot. Every enabled server
+may start a process per seat, so use an explicit sharing selection for a lighter seat.
 
 ```json
 {

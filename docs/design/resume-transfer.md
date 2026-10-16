@@ -64,8 +64,9 @@ and printed as `forked from <id>` (`implementations/cli/src/commands/agents.ts:3
 `manager.spawn` class, which a peer with the spawn capability holds.
 
 **The Claude connector does not depend on the config home for its mesh surface.** The cotal plugin
-loads with `--plugin-dir` (`extension.ts:245`), and MCP servers come only from `--mcp-config` under
-`--strict-mcp-config` (`extension.ts:295`). Provider credentials reach the seat through the
+loads with `--plugin-dir`, and its server is supplied explicitly through `--mcp-config`. Ordinary
+local sessions also use native MCP discovery. Carried private homes retain `--strict-mcp-config`.
+Provider credentials reach the seat through the
 forwarded environment keys (`CLAUDE_PROVIDER_KEYS`, `extension.ts:19`).
 
 **Claude documents a per-directory home.** From Claude Code's own documentation, read on 2026-10-05:
@@ -375,8 +376,9 @@ connectors. A mesh seat needs neither; its tools come from the local MCP server.
 
 ### 7.4 Plugins, settings and first-run state
 
-The mesh surface does not change. The cotal plugin loads with `--plugin-dir` and MCP servers come only
-from `--mcp-config` under `--strict-mcp-config`; neither reads the config home.
+For carried seats the mesh surface does not change. The cotal plugin loads with `--plugin-dir` and
+MCP servers come only from `--mcp-config` under `--strict-mcp-config`; neither reads the config home.
+Ordinary local spawns use native discovery, but a carried seat does not inherit that host profile.
 
 Nothing else from the operator's shared home is carried: installed plugins and marketplaces, user
 `settings.json`, user `CLAUDE.md`, agents and skills. A carried seat runs the mesh persona and the

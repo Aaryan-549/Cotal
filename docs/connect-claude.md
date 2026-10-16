@@ -93,7 +93,7 @@ dual-purpose MCP server:
 The manager launches the *real* `claude` (no wrapper):
 
 ```
-claude --strict-mcp-config --mcp-config '{"mcpServers":{"cotal":{…}}}' \
+claude --mcp-config '{"mcpServers":{"cotal":{…}}}' \
        --dangerously-load-development-channels server:cotal \
        --permission-mode bypassPermissions
 # env: COTAL_SPACE, COTAL_NAME, COTAL_ROLE, COTAL_CHANNEL=1, plus claude's documented auth vars
@@ -119,9 +119,9 @@ claude --strict-mcp-config --mcp-config '{"mcpServers":{"cotal":{…}}}' \
   exists. The manager or the foreground `cotal spawn` removes it, and the shared-server MCP config
   file, once it has proved the `claude` process gone. If the launcher is killed first, a watcher
   started beside `claude` removes them when `claude` exits.
-- **MCP servers.** `--strict-mcp-config` ignores every ambient MCP source, so a spawned agent
-  loads the cotal server plus the servers the cotal config shares. First-run `cotal setup`
-  fills that list with your own user-scope servers, so a spawned session has the tools you know
+- **MCP servers.** A spawned agent loads Claude's native MCP sources alongside Cotal and declared
+  sharing overrides. Explicit `--share-tools` selections and carried private homes keep strict
+  isolation. Claude still applies its own server approvals, disabled settings and managed policy
   (see below).
 - **Lean MCP server.** Every session runs its own cotal MCP server, so Node starts it with
   `--optimize-for-size --max-semi-space-size=1` to shrink its memory footprint. Managed launches and
@@ -610,33 +610,34 @@ original is untouched.
 
 ## Sharing your MCP servers
 
-A spawned session keeps your own MCP servers by default. On its first run, `cotal setup` copies
-the user-scope servers from your Claude Code config (`~/.claude.json`, or the one under
-`$CLAUDE_CONFIG_DIR`) into the cotal config file (`~/.config/cotal/config.json`) under
-`connectors.claude.mcpServers`, and names them in its output. With none to copy it writes an
-empty list. Each entry is the familiar `.mcp.json` shape ([full format](config.md)). A cotal
-config that already declares that list keeps it, and a later `cotal setup` never changes it.
+A spawned session loads the MCP servers your normal Claude Code configuration enables on the
+launch host: user, local, project, plugin and connected-account sources. Claude handles discovery,
+precedence, disabled servers, project approval and managed policy. Cotal adds its mesh server
+and any overrides declared in `connectors.claude.mcpServers` ([format](config.md)). It does not
+copy native server definitions or credentials into the launch file or onto another machine.
+The selected `CLAUDE_CONFIG_DIR` remains in effect for an ordinary local spawn.
 
-The cotal config holds secrets only as `${VAR}` references. Setup cannot tell literal text from
-a secret, so it leaves out a server with an `env` or `headers` value that is anything but `${VAR}`
-references (a `Bearer ${TOKEN}` header among them) and names it in its output. To share one,
-add it to the cotal config with each secret written as a `${VAR}` reference, and export that
-variable where you spawn. Setup also leaves out and names an entry no session can start, such as
-one with a missing or empty `command` or `url`, or one whose `command` is not a string.
+First-run setup still seeds eligible user-scope declarations into the Cotal config and preserves
+an existing list. That list is not the source of truth for native discovery. A same-named declared
+override takes precedence; changing the native definition does not rewrite an override you kept.
+An empty Cotal sharing map leaves native discovery enabled.
 
-At launch the connector forwards *only* the named vars the chosen servers declare and
-passes the merged config as an owner-only temp file; `--strict-mcp-config` stays on, so
-only cotal + the shared servers load.
+Use `--share-tools tavily,figma` to load only those declared servers plus Cotal, or
+`--share-tools none` for Cotal alone. These explicit selections use `--strict-mcp-config`.
+Carried sessions also stay strict and keep their seat-private home; operator profiles and
+connected-account credentials are not copied into them. Native managed policy still applies.
 
-For a lighter seat, share fewer. Remove an entry from the cotal config to drop it from every
-spawn, or scope one spawn with `--share-tools tavily,figma` (or `--share-tools none` for cotal
-alone). An empty list (`"mcpServers": {}`) in `~/.config/cotal/config.json` keeps every spawn
-isolated, and setup leaves it as it is.
+The child environment stays allowlisted. References in declared shared servers and the selected
+user-owned MCP configuration forward their named variables. Repository and plugin files cannot
+add ambient secret names merely by referencing them; supply such names through an explicit
+shared declaration or the existing `spawn.env` policy. Native files retain their own configured
+values. Documented native MCP switches, including the connected-account opt-out and tool-search
+choice, keep their explicit values. Cotal does not forward the entire parent environment or force
+tool definitions to load upfront.
 
-Two caveats: sharing a server grants its credential to the agent (the var lives in the
-Claude process's environment, so share only when you're fine with that teammate holding
-the key), and memory adds up, because a heavy server boots once per spawn, multiplied
-across a team, and can starve a small machine.
+Sharing a credential grants it to the session, so enable only servers the session may use.
+Each enabled server may start a process per seat; an explicit sharing selection can reduce that
+cost. Native discovery does not change Cotal's mesh identity, hooks or channel wake path.
 
 ## Host sessions in one process
 

@@ -986,10 +986,11 @@ export async function spawn(args: ParsedArgs): Promise<void> {
   }
   // Which of the operator's personal MCP servers to share with this agent: declared in the cotal
   // config (global ~/.config/cotal + the target mesh's .cotal), narrowed by an optional
-  // --share-tools selection. Default (no config) is none — the connector launches isolated.
+  // --share-tools selection. Without a selection the connector keeps its native discovery default.
   // Resolved before provisioning, so a selection naming an undeclared server refuses while there is
   // still nothing to roll back.
-  const mcpServers = connectorServers(cotalConfig, agentType, parseShareSelection(values["share-tools"]));
+  const shareTools = parseShareSelection(values["share-tools"]);
+  const mcpServers = connectorServers(cotalConfig, agentType, shareTools);
   // The operator's spawn-env policy travels the same route: absent means no extras (the OS
   // allow-list + operator knobs + connector-declared inputs), present means those names too.
   // Resolved HERE, like the servers above, because a connector never reads the config file itself.
@@ -1253,6 +1254,7 @@ export async function spawn(args: ParsedArgs): Promise<void> {
       events: launchEvents,
       eventsRequired,
       mcpServers,
+      mcpServersExclusive: shareTools !== undefined,
       envAllow,
       // Where a connector that keeps per-agent local state roots it. The manager passes its own
       // workspace root here; the foreground path did not, so an armed session refused at launch
