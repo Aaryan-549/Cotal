@@ -6,7 +6,7 @@
   "guard": "Actual foreground and manager entry points retain explicit MCP selection intent",
   "command": "pnpm exec tsx implementations/manager/smoke/start-overrides.smoke.ts && pnpm smoke:spawn-foreground-events",
   "why": [
-    "The manager check is fail fast; the caller checks must name their precise failed assertion, not require the success-only end of both suites."
+    "The command chains two suites. A manager failure intentionally skips the foreground suite; each expected red names its assertion without requiring both success-only completion lines."
   ],
   "mutations": [
     {
