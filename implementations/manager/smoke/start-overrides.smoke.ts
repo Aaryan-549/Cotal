@@ -149,12 +149,15 @@ const j = (v: unknown) => JSON.stringify(v);
   resetOpts();
   await mgr.startAgent({ name: "plain", agent: "smoke-ov", events: false });
   check("absent shareTools → all declared servers", j(Object.keys(lastOpts?.mcpServers ?? {})) === j(["alpha", "beta"]), lastOpts?.mcpServers);
+  check("absent shareTools keeps native MCP discovery", lastOpts?.mcpServersExclusive === false);
   resetOpts();
   await mgr.startAgent({ name: "plain", agent: "smoke-ov", shareTools: ["alpha"], events: false });
   check("named selection → that server only", j(Object.keys(lastOpts?.mcpServers ?? {})) === j(["alpha"]), lastOpts?.mcpServers);
+  check("named shareTools requests exclusive MCP discovery", lastOpts?.mcpServersExclusive === true);
   resetOpts();
   await mgr.startAgent({ name: "plain", agent: "smoke-ov", shareTools: [], events: false });
   check("empty shareTools → no servers", j(Object.keys(lastOpts?.mcpServers ?? {})) === j([]), lastOpts?.mcpServers);
+  check("empty shareTools requests exclusive MCP discovery", lastOpts?.mcpServersExclusive === true);
   const bad = await mgr.startAgent({ name: "plain", agent: "smoke-ov", shareTools: ["gamma"], events: false });
   check("undeclared share-tools name fails loud", bad.ok === false && /gamma/.test(bad.error ?? ""), bad);
 }

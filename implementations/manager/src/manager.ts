@@ -5463,14 +5463,14 @@ export class Manager {
     agent: string,
     shareTools: readonly string[] | undefined,
     harness: { binaries?: Readonly<Record<string, string>> },
-  ): Pick<LaunchOpts, "space" | "servers" | "mcpServers" | "envAllow" | "resolvedBinaries" | "eventsRequired" | "workspaceRoot"> {
+  ): Pick<LaunchOpts, "space" | "servers" | "mcpServers" | "mcpServersExclusive" | "envAllow" | "resolvedBinaries" | "eventsRequired" | "workspaceRoot"> {
     return {
       space: this.space,
       servers: this.servers,
-      // Personal MCP servers the operator opted to share with manager-spawned agents of this type
-      // (cotal config; default none → isolated, the memory-safe default this guards), narrowed by
-      // an optional --share-tools selection (absent → all declared, the pre-merge behavior).
+      // Declared overrides plus the connector's native default, unless this spawn explicitly
+      // restricts sharing. An empty selection is deliberate isolation, not the default.
       mcpServers: connectorServers(cotalConfig, agent, shareTools),
+      mcpServersExclusive: shareTools !== undefined,
       // The operator's spawn-env policy travels the same route: absent means no extras (the OS
       // allow-list + operator knobs + connector-declared inputs), present means those names too.
       // A connector never reads the config itself.

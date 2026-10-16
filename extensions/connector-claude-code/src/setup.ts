@@ -14,6 +14,7 @@ import {
   type McpServerSpec,
 } from "@cotal-ai/core";
 import { ENV_REFERENCE } from "@cotal-ai/connector-core";
+import { claudeUserMcpServers } from "./user-mcp.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DOCS_URL = "https://github.com/Cotal-AI/Cotal/blob/main/docs/connect-claude.md";
@@ -192,20 +193,6 @@ function skillsRow(entries: PluginEntry[] | undefined, { version, skillsRemedy }
   return row("warn", `${typeof match.version === "string" ? `v${match.version} ≠ v${version} · ` : ""}stale · ${skillsRemedy}`);
 }
 
-/** The user-scope MCP servers every Claude Code session of this user loads, from the config file
- *  `claude mcp add` writes them to. `CLAUDE_CONFIG_DIR` moves that file, as it does for `claude`. */
-function userServers(): Record<string, unknown> {
-  const path = join(process.env.CLAUDE_CONFIG_DIR?.trim() || homedir(), ".claude.json");
-  if (!existsSync(path)) return {};
-  let config: { mcpServers?: Record<string, unknown> } | null;
-  try {
-    config = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    throw new Error(`${path}: invalid JSON - ${(e as Error).message}`);
-  }
-  return config?.mcpServers ?? {};
-}
-
 /** Whether setup may copy a server entry into the cotal config: the config reader must accept it
  *  ({@link mcpServerProblem}), or every spawn would be refused. That config holds secrets only as
  *  `${VAR}` references, and literal text cannot be told apart from a secret, so every `env` and
@@ -267,7 +254,7 @@ export const claudeSetupProvider: ConnectorSetupProvider = {
       "A spawned Claude Code session gets the cotal tools plus the MCP servers your own sessions load. Each spawn starts its own copy of every shared server, so on a small machine remove the heavy ones from the cotal config or spawn with --share-tools none.",
     context: [DOCS_URL],
     run({ seed }) {
-      const installed = Object.entries(userServers());
+      const installed = Object.entries(claudeUserMcpServers());
       const shared = Object.fromEntries(installed.filter((entry): entry is [string, McpServerSpec] => copyable(...entry)));
       const left = installed.filter((entry) => !copyable(...entry)).map(([name]) => name);
       const path = globalConfigPath();

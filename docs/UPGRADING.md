@@ -34,6 +34,20 @@ What this page does not promise is a rolling upgrade. Nothing in the current lin
 authority versions, so where broker and manager run separately there is a window in which the mesh
 is down. The sections below give that window's shape so it can be scheduled rather than endured.
 
+## Native Claude MCP discovery after 0.82.2
+
+Before upgrading, snapshot Cotal configuration and the Claude profile on each launch host.
+Ordinary Claude spawns now load the host's native MCP sources alongside declared Cotal overrides.
+An empty sharing map no longer suppresses native servers. Audit enabled servers and their
+credentials before admitting new seats. Use an explicit sharing selection, including
+`--share-tools none`, to retain isolation. Existing sessions keep their loaded configuration.
+
+No broker restart, credential-format migration or cross-host profile copy is required. Upgrade
+the CLI, core, manager and connector together on each launch host. Pause new managed spawns
+while adopting the matched packages; use the runtime's supported manager custody or recovery
+path. Any interruption is that manager transition, not a change to the broker wire contract.
+Carried private homes stay isolated and do not import the operator's native profile.
+
 ## Managed Claude workspace trust in 0.80.0
 
 Before upgrading, snapshot the manager's private Cotal state and Claude configuration home.

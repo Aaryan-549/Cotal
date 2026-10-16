@@ -100,6 +100,9 @@ registry.register(liveProbe);
 mkdirSync(join(root, ".cotal", "agents"), { recursive: true });
 const persona = join(root, ".cotal", "agents", "probe.md");
 writeFileSync(persona, "---\nname: probe\nrole: worker\nsubscribe: [general]\nallowSubscribe: [general]\n---\nbody\n");
+writeFileSync(join(root, ".cotal", "config.json"), JSON.stringify({
+  connectors: { "fg-probe-emitter": { mcpServers: { alpha: { command: "true" }, beta: { command: "true" } } } },
+}));
 
 const port = await pickFreePort();
 const store = mkdtempSync(join(tmpdir(), `${SMOKE_BROKER_TOKEN}fg-events-js-`));
@@ -187,6 +190,7 @@ try {
     const r = await openRun(["--agent", "fg-probe-emitter"]);
     check("CONTROL: an ordinary foreground launch reaches the connector", r.opts !== undefined, r.stderr.slice(0, 300));
     check("CONTROL: and it is armed by default", r.opts?.events === true, r.opts?.events);
+    check("foreground default keeps native MCP discovery", r.opts?.mcpServersExclusive === false);
     // The root is passed on EVERY foreground launch, not only an armed one, and two connectors read
     // it whether or not events are on: Codex and OpenCode root their per-agent home at it. Without
     // this cell an edit that passed it only under `--events` would leave the suite green and move
@@ -230,6 +234,13 @@ try {
   {
     const r = await openRun(["--agent", "fg-probe-silent", "--no-events"]);
     check("--no-events lets a connector without an event plane launch", r.opts?.events === false, r.stderr.slice(0, 300));
+  }
+
+  {
+    const none = await openRun(["--agent", "fg-probe-emitter", "--share-tools", "none"]);
+    check("foreground --share-tools none reaches the connector as an exclusive empty selection", none.opts?.mcpServersExclusive === true && Object.keys(none.opts.mcpServers ?? {}).length === 0, none.stderr.slice(0, 300));
+    const named = await openRun(["--agent", "fg-probe-emitter", "--share-tools", "alpha"]);
+    check("foreground named sharing reaches the connector as an exclusive selection", named.opts?.mcpServersExclusive === true && Object.keys(named.opts.mcpServers ?? {}).join() === "alpha", named.stderr.slice(0, 300));
   }
 
   // ── #1837: the user-auth departure sentence names its own arm's cleanup ────────────────────────
@@ -307,7 +318,7 @@ try {
   rmSync(store, { recursive: true, force: true });
 }
 
-const EXPECTED = 14;
+const EXPECTED = 17;
 check(`every cell ran - ${EXPECTED} expected`, pass + fail === EXPECTED, `${pass + fail} cells reported`);
 console.log(`SUITE COMPLETE: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

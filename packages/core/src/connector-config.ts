@@ -5,12 +5,10 @@
  *   ~/.config/cotal/config.json   (operator-level, every space)   ← base layer
  *   <root>/.cotal/config.json     (space-local override)          ← higher precedence
  *
- * Today it carries one thing: which of the operator's personal MCP servers a connector should
- * SHARE with the agents it spawns. With no list a spawned agent gets none — the Claude connector
- * launches with `--strict-mcp-config`, dropping every operator server. First-run setup seeds the
- * list from the servers the user's own harness sessions load, so a spawned session keeps their
- * tools; removing entries makes a lighter seat, since each spawn boots its own copy of every shared
- * server (a headless Chromium server alone can climb past a gigabyte).
+ * It carries the operator's declared MCP sharing overrides. Claude also loads its native MCP
+ * configuration by default; an explicit per-spawn selection restricts it to the chosen overrides
+ * and the mesh server. First-run setup seeds the declared list from eligible user-scope servers.
+ * Each spawned session starts its own MCP processes.
  *
  * Each server is written in the de-facto `.mcp.json` shape, so an operator can copy an entry
  * straight out of their own Claude / VS Code / Cursor config. Secrets ride as `${VAR}` references
