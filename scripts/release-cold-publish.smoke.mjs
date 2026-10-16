@@ -1,22 +1,82 @@
 #!/usr/bin/env node
-// Synthetic publication controls only. The native matrix and real-pnpm archive probe are separate.
+// Synthetic packing/publication controls only. The native matrix and real-pnpm archive probe are separate.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { coldPublicationInputs, publishColdCandidate } from "./publish-cold-candidate.mjs";
+import { packColdCandidate } from "./pack-cold-candidate.mjs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { coldOsEnvironment } from "./release-cold-environment.mjs";
+
+// Exercise the source imports through a real entrypoint in a fresh personal environment.
+if (!process.argv.includes("--contract-child")) {
+  const home = mkdtempSync(join(tmpdir(), "cold-contract-child-"));
+  let status = 0;
+  try {
+    execFileSync(process.execPath, [fileURLToPath(import.meta.url), "--contract-child"], {
+      stdio: "inherit",
+      env: { ...coldOsEnvironment(), HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home, XDG_CONFIG_HOME: home, XDG_CACHE_HOME: home, TMPDIR: home, TMP: home, TEMP: home },
+    });
+  } catch (error) {
+    console.error(`contract subprocess failed (${error.status ?? error.code})`);
+    status = 1;
+  } finally { rmSync(home, { recursive: true, force: true }); }
+  process.exit(status);
+}
 
 const root = mkdtempSync(join(tmpdir(), "cold-publication-contract-"));
 const source = "a".repeat(40);
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 let passed = 0;
-const check = async (name, fn) => { await fn(); passed++; console.log(`PASS ${name}`); };
+const check = async (name, fn) => {
+  try { await fn(); }
+  catch (error) { console.error(`FAIL ${name}`); throw error; }
+  passed++; console.log(`PASS ${name}`);
+};
 try {
   const rows = ["one", "two"].map((name) => {
     const path = join(root, name); mkdirSync(path);
     writeFileSync(join(path, "package.json"), JSON.stringify({ name, version: "1.0.0", scripts: { prepublishOnly: "fixture-guard" } }));
     return { name, version: "1.0.0", path };
+  });
+  mkdirSync(join(root, ".changeset"));
+  writeFileSync(join(root, ".changeset/config.json"), JSON.stringify({ fixed: [["one", "two"]] }));
+  await check("cold candidate runs prepublish guards before packing", () => {
+    const output = join(root, "packed");
+    const events = [];
+    const packed = packColdCandidate({ root, output, exec: (file, args) => {
+      if (file === "git") { assert.deepEqual(args, ["rev-parse", "HEAD"]); return source + "\n"; }
+      if (file === "pnpm") {
+        if (args[0] === "list") return JSON.stringify(rows);
+        if (args[0] === "-r") { events.push(args.at(-1)); return; }
+        assert.equal(args[0], "--dir");
+        const row = rows.find((row) => row.path === args[1]); assert(row);
+        events.push(`pack:${row.name}`);
+        writeFileSync(join(output, row.name + ".tgz"), "synthetic candidate " + row.name);
+        return;
+      }
+      assert.equal(file, "tar");
+      const name = basename(args[1], ".tgz");
+      const row = rows.find((row) => row.name === name); assert(row);
+      if (args[0] === "-tf") return "package/package.json\npackage/dist/index.js\n";
+      assert.equal(args[0], "-xOf");
+      if (args[2] === "package/package.json") return readFileSync(join(row.path, "package.json"), "utf8");
+      assert.equal(args[2], "package/dist/index.js");
+      return Buffer.from("synthetic distribution " + name);
+    } });
+    assert.deepEqual(events, ["prepublishOnly", "pack:one", "pack:two"]);
+    assert.deepEqual(packed.prepublishOnly, ["one", "two"]);
+    assert.equal(packed.source, source);
+    assert.deepEqual(JSON.parse(readFileSync(join(output, "manifest.json"), "utf8")), packed);
+    assert(packed.packages.every((row) => row.files["dist/index.js"] && row.sourceManifest));
+  });
+  await check("incomplete pack census prevents every prepublish guard", () => {
+    assert.throws(() => packColdCandidate({ root, output: join(root, "rejected"), exec: (file, args) => {
+      assert.equal(file, "pnpm"); assert.equal(args[0], "list"); return JSON.stringify(rows.slice(0, 1));
+    } }), /public package census disagrees/);
   });
   const manifest = { source, prepublishOnly: ["one", "two"], packages: rows.map((row) => {
     const archive = row.name + ".tgz";
@@ -51,6 +111,10 @@ try {
     if (file === "git") { assert.deepEqual(args, ["rev-parse", "HEAD"]); return source + "\n"; }
     assert.equal(file, "pnpm"); calls.push(args);
   }, preflight: async () => ({ state: "ready", rows }) };
+  await check("secure preflight refusal prevents every publication", async () => {
+    await assert.rejects(() => publishColdCandidate({ ...options, preflight: async () => { throw new Error("fixture authority refusal"); } }), /fixture authority refusal/);
+    assert.equal(calls.length, 0);
+  });
   await check("publisher sends only qualified archive paths with provenance and no hooks", async () => {
     assert.equal((await publishColdCandidate(options)).length, 2);
     assert.deepEqual(calls, manifest.packages.map((pkg) => ["publish", join(root, pkg.archive), "--provenance", "--access=public", "--no-git-checks", "--ignore-scripts", "--tag", "latest"]));
@@ -58,10 +122,6 @@ try {
   calls.length = 0;
   await check("all-present secure preflight remains a no-op", async () => {
     assert.deepEqual(await publishColdCandidate({ ...options, preflight: async () => ({ state: "nothing-to-publish", rows }) }), []);
-    assert.equal(calls.length, 0);
-  });
-  await check("secure preflight refusal prevents every publication", async () => {
-    await assert.rejects(() => publishColdCandidate({ ...options, preflight: async () => { throw new Error("fixture authority refusal"); } }), /fixture authority refusal/);
     assert.equal(calls.length, 0);
   });
   const last = join(root, "two.tgz"), originalArchive = readFileSync(last);
@@ -87,3 +147,4 @@ try {
   });
 } finally { rmSync(root, { recursive: true, force: true }); }
 console.log(`COLD PUBLICATION CONTRACT OK (${passed} checks; synthetic fixtures only)`);
+console.log(`SUITE COMPLETE: ${passed} passed, 0 failed`);
