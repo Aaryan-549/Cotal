@@ -132,11 +132,17 @@ const native = coldJobs.get("native") ?? "";
 const candidate = coldJobs.get("candidate") ?? "";
 const packer = readFileSync(join(ROOT, "scripts/pack-cold-candidate.mjs"), "utf8");
 const publisher = readFileSync(join(ROOT, "scripts/publish-cold-candidate.mjs"), "utf8");
-check("cold candidate needs the native builder matrix", /^\s+needs:\s*native\s*$/m.test(candidate));
+check("cold candidate needs the native builder matrix", needsList(candidate).includes("native"));
 check("cold native matrix builds x64 and arm64 on native Linux", /arch: x64\s+runner: ubuntu-latest/.test(native) && /arch: arm64\s+runner: ubuntu-24.04-arm/.test(native));
 check("cold candidate downloads both native artifacts", ["cold-native-x64", "cold-native-arm64"].every((name) => downloaded(candidate).includes(name)));
 check("cold candidate assembles natives before packing", candidate.indexOf("seat-assemble-natives.mjs") >= 0 && candidate.indexOf("seat-assemble-natives.mjs") < candidate.indexOf("pack-cold-candidate.mjs"));
 check("cold candidate runs prepublish guards before packing", packer.includes('"run", "prepublishOnly"') && packer.indexOf('"run", "prepublishOnly"') < packer.indexOf('"pack", "--pack-destination"'));
+const windowsNative = coldJobs.get("workspace-native") ?? "";
+const windowsRecipe = readFileSync(join(ROOT, ".github/workflows/workspace-native.yml"), "utf8");
+check("cold candidate needs the Windows native builder", needsList(candidate).includes("workspace-native"));
+check("cold Windows builder uses the shared dual-architecture recipe", /^\s+uses:\s*\.\/.github\/workflows\/workspace-native\.yml\s*$/m.test(windowsNative) && !/architectures:/.test(windowsNative) && /default:\s*'\["x64",\s*"arm64"\]'/.test(windowsRecipe));
+check("cold candidate downloads both Windows native artifacts", ["workspace-native-x64", "workspace-native-arm64"].every((name) => downloaded(candidate).includes(name)));
+check("cold candidate assembles Windows natives before packing", candidate.indexOf("workspace-assemble-natives.mjs") >= 0 && candidate.indexOf("workspace-assemble-natives.mjs") < candidate.indexOf("pack-cold-candidate.mjs"));
 
 console.log("\nC. Qualified archive publication");
 for (const [name, body] of [["version", version], ["snapshot", snapshot]]) {

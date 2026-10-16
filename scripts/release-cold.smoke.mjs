@@ -23,7 +23,7 @@ check("normal and snapshot publication require the cold workflow", () => {
   for (const name of ["version", "snapshot"]) assert(release.jobs[name].needs.includes("cold-setup"));
   assert.equal(release.jobs["cold-setup"].uses, "./.github/workflows/cold-setup.yml");
   assert.equal(release.jobs["cold-setup"]["continue-on-error"], undefined);
-  assert.deepEqual(workflow.jobs["cold-ok"].needs, ["native", "candidate", "lifecycle"]);
+  assert.deepEqual(workflow.jobs["cold-ok"].needs, ["native", "workspace-native", "candidate", "lifecycle"]);
   assert.equal(workflow.jobs["cold-ok"].if, "always()");
   assert(workflow.jobs["cold-ok"].steps.some((step) => step.run?.includes("verify-cold-results.mjs")));
 });

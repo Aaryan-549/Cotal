@@ -31,8 +31,8 @@
     {
       "name": "Cold candidate drops the native builder dependency",
       "file": ".github/workflows/cold-setup.yml",
-      "find": "  candidate:\n    needs: native\n",
-      "replace": "  candidate:\n    needs: []\n",
+      "find": "  candidate:\n    needs: [native, workspace-native]\n",
+      "replace": "  candidate:\n    needs: [workspace-native]\n",
       "expectRed": "cold candidate needs the native builder matrix",
       "cell": "cold candidate needs the native builder matrix"
     },
@@ -99,6 +99,38 @@
       "replace": "    permissions:\n      contents: read\n",
       "expectRed": "changesets.yml snapshot is bound to the npm-publish Environment",
       "cell": "changesets.yml snapshot is bound to the npm-publish Environment"
+    },
+    {
+      "name": "Cold candidate drops the Windows native dependency",
+      "file": ".github/workflows/cold-setup.yml",
+      "find": "  candidate:\n    needs: [native, workspace-native]\n",
+      "replace": "  candidate:\n    needs: [native]\n",
+      "expectRed": "cold candidate needs the Windows native builder",
+      "cell": "cold candidate needs the Windows native builder"
+    },
+    {
+      "name": "Windows native recipe stops building arm64",
+      "file": ".github/workflows/workspace-native.yml",
+      "find": "        default: '[\"x64\", \"arm64\"]'",
+      "replace": "        default: '[\"x64\"]'",
+      "expectRed": "cold Windows builder uses the shared dual-architecture recipe",
+      "cell": "cold Windows builder uses the shared dual-architecture recipe"
+    },
+    {
+      "name": "Cold candidate stops downloading Windows arm64 identity",
+      "file": ".github/workflows/cold-setup.yml",
+      "find": "          name: workspace-native-arm64\n",
+      "replace": "          name: missing-workspace-native-arm64\n",
+      "expectRed": "cold candidate downloads both Windows native artifacts",
+      "cell": "cold candidate downloads both Windows native artifacts"
+    },
+    {
+      "name": "Cold candidate skips Windows native assembly",
+      "file": ".github/workflows/cold-setup.yml",
+      "find": "        run: node scripts/workspace-assemble-natives.mjs\n",
+      "replace": "        run: echo skip-workspace-native-assembly\n",
+      "expectRed": "cold candidate assembles Windows natives before packing",
+      "cell": "cold candidate assembles Windows natives before packing"
     }
   ]
 }
