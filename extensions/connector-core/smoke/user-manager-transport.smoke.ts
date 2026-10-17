@@ -731,6 +731,44 @@ try {
   check("MeshAgent stopped cleanly", true);
 
   // ==========================================
+  // Test 1b: A host-supplied bearer function, as an in-process gateway passes it
+  // ==========================================
+  console.log("\n--- Scenario 1b: MeshAgent User-Mode With A Host Bearer Function ---");
+  let hostBearerCalls = 0;
+  const hostBearer = async (): Promise<string> => {
+    hostBearerCalls++;
+    const r = await execBearer(bearerArgv());
+    if (r.code !== 0 || !r.stdout.trim()) throw new Error(`host bearer failed: ${r.stderr.trim()}`);
+    return r.stdout.trim();
+  };
+  agent = new MeshAgent({
+    space: SPACE,
+    name: "agent-hosted",
+    servers: SERVER,
+    tls: false,
+    lifecycleUid: ownerAUid,
+    userAuth: { owner: OWNER_A, actor: AGENT_ACTOR, sentinelCreds: callout.sentinelCreds, bearer: hostBearer },
+    subscribe: [],
+    allowSubscribe: [],
+    allowPublish: [],
+  });
+  // Bounded: a bearer source that never yields must turn this scenario red, not hang the suite.
+  const hostedStart = await Promise.race([
+    agent.start().then(() => agent!.whenConnected()).then(() => "connected", (e: unknown) => `failed: ${(e as Error).message}`),
+    wait(30_000).then(() => "timed out after 30 s"),
+  ]);
+  check("MeshAgent connected on the user-auth broker with a host bearer function", hostedStart === "connected" && agent.connected === true, hostedStart);
+  check("the host bearer function supplied the connection's bearer", hostBearerCalls >= 1, hostBearerCalls);
+  const hostedPersonas = agent.connected ? await agent.listPersonas() : { ok: false, error: "not connected" };
+  check(
+    "a host-bearer agent refuses manager calls with no manager-call bearer",
+    hostedPersonas.ok === false && /issues no manager-call bearer/.test(String((hostedPersonas as { error?: unknown }).error ?? "")),
+    hostedPersonas,
+  );
+  await agent.stop();
+  agent = undefined;
+
+  // ==========================================
   // Test 2: Native Broker Grants (No Wildcard/Class, Instance-Only)
   // ==========================================
   console.log("\n--- Scenario 2: Native Broker Grants Least-Privilege Verification ---");
@@ -973,10 +1011,10 @@ try {
   }
 }
 
-const EXPECTED_CHECKS = 47;
+const EXPECTED_CHECKS = 50;
 check("all smoke checks passed", pass + fail === EXPECTED_CHECKS, { pass, fail, expected: EXPECTED_CHECKS });
 
-const ACTUAL_COUNT_GUARD = 48;
+const ACTUAL_COUNT_GUARD = 51;
 emitSentinel({ passed: pass, failed: fail, cells: pass + fail });
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} — ${pass} passed, ${fail} failed`);
 console.log("USER-MANAGER-TRANSPORT SMOKE COMPLETE");
