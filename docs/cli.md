@@ -884,7 +884,9 @@ directory that exists but cannot be read, such as one without read permission or
 its place, also makes every command that reads the registry exit 1 with its path and the read
 error. Only an absent directory is an empty registry. A record removed between listing and reading
 is omitted from that listing. A keyed read also treats a record removed during its read as absent;
-parse, shape and other read failures still refuse by name.
+parse, shape and other read failures still refuse by name. Recording or removing a mesh also sweeps
+the directory for an older-format record of the same space. Any error listing the directory for
+that sweep, other than an absent directory, fails the operation with that error.
 
 An IdP may advertise a same-origin space catalog during login. Cotal reads the complete snapshot and
 adds every valid registration without a separate `meshes add`. A snapshot younger than five seconds
