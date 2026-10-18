@@ -2,7 +2,7 @@
   "suite": [
     "implementations/cli/smoke/send.smoke.ts"
   ],
-  "guard": "a one-shot `cotal send` leaves no consumer on the presence or channel-registry stream (#4091)",
+  "guard": "a one-shot `cotal send` or `cotal channels list` leaves no consumer on the presence or channel-registry stream (#4091)",
   "command": "pnpm --filter @cotal-ai/cli... build && pnpm smoke:send",
   "completionMarker": "send smoke:",
   "proveWith": "node scripts/mutation-proof.mjs --config implementations/cli/smoke/mutations/send-watch-leak.json",
@@ -47,6 +47,16 @@
       "expectRed": "three one-shot sends leave no consumer on the presence or channel-registry stream (#4091)",
       "cell": "three one-shot sends leave no consumer on the presence or channel-registry stream (#4091)",
       "note": "Only the channel-registry stream leaks."
+    },
+    {
+      "name": "`cotal channels list` scans the registry with a consumer again",
+      "file": "implementations/cli/src/commands/channels.ts",
+      "find": "...auth, directGet: !conn.bearer }",
+      "replace": "...auth, directGet: false }",
+      "afterRestore": "pnpm --filter @cotal-ai/cli... build",
+      "expectRed": "`cotal channels list` leaves no consumer on the channel-registry stream (#4091)",
+      "cell": "`cotal channels list` leaves no consumer on the channel-registry stream (#4091)",
+      "note": "The pre-fix read: liveKvEntries binds a scan consumer whose delete the operator profile is refused."
     }
   ]
 }

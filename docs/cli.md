@@ -2090,6 +2090,10 @@ channel-writer view, which needs ledger scope `admin` ([Identity & auth](identit
 On a remote user-auth mesh that view is served by the public exchange; space-history `purger`
 and the read-only admin view are not.
 
+With a static or open-mesh credential, `list` reads the registry with one Direct Get and leaves no
+consumer on the broker. On a user-auth mesh your login has no Direct Get row on the registry, so
+`list` scans it with a consumer that stays on the broker for five minutes after the command exits.
+
 
 ## history
 

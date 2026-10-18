@@ -10,7 +10,8 @@
  *
  * Leak check (#4091): each one-shot send reads presence and the channel registry once, with no watch
  * consumer, so the consumer count on both buckets is the same before and after the sends. The old
- * watch left one consumer per send on each bucket for five minutes.
+ * watch left one consumer per send on each bucket for five minutes. `cotal channels list` on the same
+ * operator credential reads the registry with a Direct Get and leaves no consumer either.
  *
  * Run: pnpm smoke:send
  */
@@ -46,7 +47,7 @@ import { authDir, recordMesh, saveSpaceAuth, setCurrent } from "@cotal-ai/worksp
 import { pickFreePort } from "../../../packages/core/smoke/_free-port.js";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const EXPECTED = 38;
+const EXPECTED = 40;
 let pass = 0;
 let fail = 0;
 const check = (name: string, cond: boolean, extra?: unknown) => {
@@ -208,6 +209,8 @@ try {
   const ask = await run(["send", "ask", "reviewer", askText]);
   await wait(700);
   const consumersAfter = await watchConsumers();
+  const listed = await run(["channels", "list"]);
+  const consumersAfterList = await watchConsumers();
   await inspector.close();
 
   check(
@@ -219,6 +222,12 @@ try {
     "three one-shot sends leave no consumer on the presence or channel-registry stream (#4091)",
     consumersAfter.presence === consumersBefore.presence && consumersAfter.channels === consumersBefore.channels,
     { before: consumersBefore, after: consumersAfter },
+  );
+  check("`cotal channels list` exits 0 and lists the seeded #general", listed.code === 0 && listed.stdout.includes("#general"), listed);
+  check(
+    "`cotal channels list` leaves no consumer on the channel-registry stream (#4091)",
+    consumersAfterList.channels === consumersAfter.channels,
+    { before: consumersAfter, after: consumersAfterList },
   );
 
   check("`cotal send dm` outside a seat exits 0", dm.code === 0, dm.stderr);
