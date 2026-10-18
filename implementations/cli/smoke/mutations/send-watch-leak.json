@@ -21,8 +21,8 @@
     {
       "name": "the transient endpoint watches again",
       "file": "implementations/cli/src/lib/transient.ts",
-      "find": "    readOnce: true,\n",
-      "replace": "",
+      "find": "  const readOnce = conn.bearer === undefined;",
+      "replace": "  const readOnce = false;",
       "afterRestore": "pnpm --filter @cotal-ai/cli... build",
       "expectRed": "three one-shot sends leave no consumer on the presence or channel-registry stream (#4091)",
       "cell": "three one-shot sends leave no consumer on the presence or channel-registry stream (#4091)",

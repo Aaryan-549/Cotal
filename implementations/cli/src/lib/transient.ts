@@ -26,15 +26,20 @@ export async function resolveConnect(values: ConnectValues): Promise<Connection>
   return connectOrExit(values, "operator");
 }
 
-/** Open a transient endpoint: it reads presence and the channel registry once at start (so name→id
- *  resolution and the roster work) but never registers itself, binds no inbox, consumes no channels,
- *  and binds no watch consumer, so a stopped one leaves nothing on the broker (#4091). The caller
- *  stops it. */
+/** Open a transient endpoint: it holds the roster and the channel registry on return (so name→id
+ *  resolution works) but never registers itself, binds no inbox, and consumes no channels. The
+ *  caller stops it.
+ *
+ *  With a static or open-mesh credential it reads both buckets once and binds no watch consumer, so
+ *  a stopped one leaves nothing on the broker (#4091). A user bearer carries the agent profile, which
+ *  has no batched Direct Get row on those buckets, so on a user-auth mesh it watches them and waits
+ *  for the presence replay; that watch's consumer stays until the broker's inactive threshold. */
 export async function openTransient(
   values: ConnectValues,
   name: string,
 ): Promise<{ ep: CotalEndpoint; space: string }> {
   const conn = await resolveConnect(values);
+  const readOnce = conn.bearer === undefined;
   const ep = new CotalEndpoint({
     space: conn.space,
     servers: conn.server,
@@ -43,7 +48,7 @@ export async function openTransient(
     consume: false,
     registerPresence: false,
     watchPresence: true,
-    readOnce: true,
+    readOnce,
     // Display name only. The wire principal comes from the resolved static credential or user
     // bearer; on an open mesh the endpoint self-mints it. Process environment never supplies
     // authority for an operator command.
@@ -52,5 +57,6 @@ export async function openTransient(
   ep.on("error", (e: Error) => console.error(c.red("! " + e.message)));
   ep.on("warning", (e: Error) => console.error(c.yellow("! " + e.message)));
   await ep.start();
+  if (!readOnce) await ep.waitForPresenceSnapshot();
   return { ep, space: conn.space };
 }

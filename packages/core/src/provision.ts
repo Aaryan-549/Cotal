@@ -1456,9 +1456,7 @@ export function permissionsFor(
     `$JS.API.CONSUMER.INFO.${DLV}.${dlvD}`,
     `$JS.API.CONSUMER.MSG.NEXT.${DLV}.${dlvD}`,
     `$JS.ACK.${DLV}.${dlvD}.>`,
-    // Presence: watch (read, public roster) + flow control + PUT OWN KEY ONLY. The bare DIRECT.GET is
-    // the batched one-time read a user-mode `cotal send` makes on this bearer (#4091): the same roster.
-    `$JS.API.DIRECT.GET.${KV}`,
+    // Presence: watch (read, public roster) + flow control + PUT OWN KEY ONLY.
     `$JS.API.CONSUMER.CREATE.${KV}.>`,
     `$JS.API.CONSUMER.INFO.${KV}.>`,
     // No CONSUMER.DELETE here or on the registry below: the watch's `oc_<nuid>_<serial>` name
@@ -1466,10 +1464,8 @@ export function permissionsFor(
     // rebuild's refused predecessor delete leaves that consumer to the broker's inactive threshold.
     "$JS.FC.>",
     `$KV.${presenceBucket(space)}.${pk.key}`, // own presence key (owner+actor) only — can't spoof peers
-    // Channel registry: read-only (watch, the batched one-time read, and direct kv.get for the
-    // join-time replay decision).
+    // Channel registry: read-only (watch + direct kv.get for the join-time replay decision).
     // No `$KV.${channelBucket(space)}.*` publish — privileged-write, default-deny gives that free.
-    `$JS.API.DIRECT.GET.${CHKV}`,
     `$JS.API.STREAM.MSG.GET.${CHKV}`,
     `$JS.API.CONSUMER.CREATE.${CHKV}.>`,
     `$JS.API.CONSUMER.INFO.${CHKV}.>`,
