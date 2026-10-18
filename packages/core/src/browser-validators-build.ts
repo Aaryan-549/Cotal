@@ -8,6 +8,7 @@
  * `BrowserContractSet` with one standalone validator per closure digest (`standaloneContractSource`,
  * the same profile options as `compileContract`) and the cluster documents by cluster digest.
  */
+import { parse, type Node } from "acorn";
 import { singleDocumentClosure, standaloneContractSource } from "./schema-profile.js";
 
 export interface BrowserContractSource {
@@ -19,21 +20,87 @@ export interface BrowserContractSource {
   roots: unknown[];
 }
 
-/** Ajv's standalone output still names its runtime helpers with `require`, even in ESM mode. Each is
- *  rewritten to an ESM namespace import; any other `require`, or any runtime code generation, refuses. */
-const RUNTIME_REQUIRE = /require\("ajv\/dist\/runtime\/(ucs2length|equal|uri|quote|timestamp|re2|parseJson)"\)\.(\w+)/g;
+/** Ajv's standalone output still names its runtime helpers with `require`, even in ESM mode. Each
+ *  `require("ajv/dist/runtime/<helper>").<name>` read is rewritten to an ESM namespace import. The
+ *  check walks the parsed validator, so schema data in a string literal or a comment is never taken
+ *  for code: any other reference to `require`, `eval` or `Function`, or a call of a member with one
+ *  of those names, refuses. */
+const RUNTIME_HELPERS = new Set(["ucs2length", "equal", "uri", "quote", "timestamp", "re2", "parseJson"]);
+const RUNTIME_PREFIX = "ajv/dist/runtime/";
+const EXECUTABLE = new Set(["require", "eval", "Function"]);
 const HEADER = /^"use strict";\s*export const validate = (\w+);\s*export default \1;/;
+const PROLOGUE = '(() => {\n"use strict";\n';
+
+/** Acorn nodes are loosely typed; this is the shape we actually read. */
+type AnyNode = Node & Record<string, unknown>;
+type HelperRead = { start: number; end: number; helper: string; name: string };
+
+const isNode = (value: unknown): value is AnyNode =>
+  typeof value === "object" && value !== null && typeof (value as { type?: unknown }).type === "string";
+
+/** The name a callee reads: `x`, `o.x` and `o["x"]` all name `x`. */
+function calleeName(node: AnyNode): string | undefined {
+  if (node.type === "Identifier") return node.name as string;
+  if (node.type !== "MemberExpression") return undefined;
+  const property = node.property as AnyNode;
+  if (!node.computed) return property.type === "Identifier" ? (property.name as string) : undefined;
+  return property.type === "Literal" && typeof property.value === "string" ? property.value : undefined;
+}
+
+/** `require("ajv/dist/runtime/<helper>").<name>` with a known helper, as that helper and name. */
+function runtimeHelper(node: AnyNode): Omit<HelperRead, "start" | "end"> | undefined {
+  if (node.type !== "MemberExpression" || node.computed || node.optional) return undefined;
+  const call = node.object as AnyNode;
+  const property = node.property as AnyNode;
+  if (call.type !== "CallExpression" || call.optional || property.type !== "Identifier") return undefined;
+  const callee = call.callee as AnyNode;
+  const args = call.arguments as AnyNode[];
+  const spec = args[0];
+  if (callee.type !== "Identifier" || callee.name !== "require" || args.length !== 1 || spec?.type !== "Literal") return undefined;
+  if (typeof spec.value !== "string" || !spec.value.startsWith(RUNTIME_PREFIX)) return undefined;
+  const helper = spec.value.slice(RUNTIME_PREFIX.length);
+  return RUNTIME_HELPERS.has(helper) ? { helper, name: property.name as string } : undefined;
+}
+
+function collectHelperReads(node: AnyNode, digest: string, reads: HelperRead[]): void {
+  const read = runtimeHelper(node);
+  if (read) {
+    reads.push({ start: node.start, end: node.end, ...read });
+    return;
+  }
+  const callee =
+    node.type === "CallExpression" || node.type === "NewExpression" ? (node.callee as AnyNode)
+    : node.type === "TaggedTemplateExpression" ? (node.tag as AnyNode)
+    : undefined;
+  const called = callee && calleeName(callee);
+  if ((node.type === "Identifier" && EXECUTABLE.has(node.name as string)) || (called !== undefined && EXECUTABLE.has(called)))
+    throw new Error(`closure ${digest}: standalone output still needs require or runtime evaluation`);
+  for (const [key, value] of Object.entries(node)) {
+    // A property name is not a reference: `data.eval` reads the field a schema calls "eval".
+    if (!node.computed && ((node.type === "MemberExpression" && key === "property") || (node.type === "Property" && key === "key"))) continue;
+    for (const child of Array.isArray(value) ? value : [value]) if (isNode(child)) collectHelperReads(child, digest, reads);
+  }
+}
 
 function validatorBody(source: string, digest: string, helpers: Set<string>): string {
   const head = HEADER.exec(source);
   if (!head) throw new Error(`closure ${digest}: unexpected standalone output shape`);
-  const body = source.slice(head[0].length).replace(RUNTIME_REQUIRE, (_m, mod: string, name: string) => {
-    helpers.add(mod);
-    return `__rt(__rt_${mod}, ${JSON.stringify(name)})`;
-  });
-  if (/\brequire\s*\(|new Function|\beval\s*\(/.test(body))
-    throw new Error(`closure ${digest}: standalone output still needs require or runtime evaluation`);
-  return `(() => {\n"use strict";\n${body}\nreturn ${head[1]};\n})()`;
+  const body = source.slice(head[0].length);
+  const epilogue = `\nreturn ${head[1]};\n})()`;
+  let program: AnyNode;
+  try {
+    program = parse(PROLOGUE + body + epilogue, { ecmaVersion: "latest", sourceType: "script" }) as unknown as AnyNode;
+  } catch (error) {
+    throw new Error(`closure ${digest}: standalone output does not parse: ${(error as Error).message}`);
+  }
+  const reads: HelperRead[] = [];
+  collectHelperReads(program, digest, reads);
+  let rewritten = body;
+  for (const { start, end, helper, name } of reads.sort((a, b) => b.start - a.start)) {
+    helpers.add(helper);
+    rewritten = `${rewritten.slice(0, start - PROLOGUE.length)}__rt(__rt_${helper}, ${JSON.stringify(name)})${rewritten.slice(end - PROLOGUE.length)}`;
+  }
+  return PROLOGUE + rewritten + epilogue;
 }
 
 /** The generated module text, and how many clusters and closures it carries. */
