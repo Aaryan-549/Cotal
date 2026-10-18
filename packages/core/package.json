@@ -39,6 +39,14 @@
     "./launch-material": {
       "types": "./dist/launch-material.d.ts",
       "import": "./dist/launch-material.js"
+    },
+    "./browser-control": {
+      "types": "./dist/browser-control.d.ts",
+      "import": "./dist/browser-control.js"
+    },
+    "./browser-validators-build": {
+      "types": "./dist/browser-validators-build.d.ts",
+      "import": "./dist/browser-validators-build.js"
     }
   },
   "scripts": {
