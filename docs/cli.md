@@ -1654,7 +1654,13 @@ terminalizes only its own durable static slots, verify-evicts the predecessor's 
 records that result in the lifecycle's caller-readable audit detail, reaps the predecessor's seat
 process through the runtime's custody reference recorded on the slot (the pty runtime verifies the
 process start identity in its seat record, so a reused pid is never signalled), and only then
-retires the lifecycle and frees the alias. A runtime that custodies its seats reserves that
+retires the lifecycle and frees the alias. A seat whose spawn carried `supervise` with restarts left
+is restarted instead of retired: the successor reaps any seat the slot still names, relaunches it
+under the same name, lifecycle uid, credential, persona and cwd, and counts the restart against the
+policy. It does that from the record the manager writes to `.cotal/seat-records/<space>/<name>.json`
+once a supervised seat is ready, rewrites at every restart and credential renewal, and removes when
+the seat is freed. A spent budget, a missing record, an expired credential, or a persona file or credential that no longer
+matches the record retires the lifecycle as above. A runtime that custodies its seats reserves that
 reference before it launches one, and the manager records it on the slot's first durable row, so a
 manager that dies part-way through a spawn also leaves a seat its successor can address. A
 same-lifecycle restart or a resume records the new seat's reference on the slot the same way, and
