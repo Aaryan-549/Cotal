@@ -249,6 +249,7 @@
     "smoke:claude-hosted-env": "tsx extensions/connector-claude-code/smoke/hosted-env.smoke.ts",
     "smoke:claude-hosted-types": "pnpm --filter @cotal-ai/connector-claude-code... build && tsx extensions/connector-claude-code/smoke/hosted-types.smoke.ts",
     "smoke:claude-hosted-presence": "pnpm --filter @cotal-ai/connector-claude-code... build && tsx extensions/connector-claude-code/smoke/hosted-presence.smoke.ts",
+    "smoke:claude-hosted-session-directory": "pnpm --filter @cotal-ai/connector-claude-code... build && tsx extensions/connector-claude-code/smoke/hosted-session-directory.smoke.ts",
     "smoke:claude-workspace-trust": "tsx implementations/manager/smoke/claude-workspace-trust.smoke.ts && tsx implementations/manager/smoke/startup-choices.smoke.ts",
     "smoke:claude-persona-file": "pnpm --filter @cotal-ai/connector-claude-code... build && tsx extensions/connector-claude-code/smoke/persona-file.smoke.ts",
     "smoke:claude-events-arm": "tsx extensions/connector-claude-code/smoke/events-arm.smoke.ts",
