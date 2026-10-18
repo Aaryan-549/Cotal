@@ -216,7 +216,8 @@ epoch its own registration committed, never at the epoch of a later start of the
 On a static or open mesh,
 an untargeted spawn rides class anycast (any manager may accept, and the acceptance records which one did).
 `cotal spawn <persona> --detach --on <instance>` and `cotal_spawn(instance: "<instance>")`
-pin one instance by its exact id. A foreground CLI spawn has no manager to pin and refuses the
+pin one instance by its exact id, as `--on` does for `cotal ps`, `cotal models` and every hosted
+`cotal run` verb, and `instance` for `cotal_run` and `cotal_personas`. A foreground CLI spawn has no manager to pin and refuses the
 flag. An MCP pin that does not resolve is refused without falling back to class anycast. There are no ordinal
 aliases and no short forms: wherever a display names an instance you can address, it prints
 the whole id, because both surfaces take nothing else.
@@ -225,10 +226,13 @@ On a user-auth mesh, manager commands obtain a short-lived `manager-caller` view
 exchange. It authorizes one concrete manager instance using the caller's current actor grant and
 the host's registered service records. Discovery and invocation both use that instance's `inst`
 route. This view grants no registry scan, class queue, or additional command capability. An absent,
-ambiguous or unauthorized selection refuses before the command is sent.
+ambiguous or unauthorized selection refuses before the command is sent. An ambiguous one lists the
+owner's live manager instance ids and names the caller's way to pick one: `--on <instanceId>` for
+the CLI, the `instance` argument for an agent's tools.
 
 Managed launches carry `COTAL_MANAGER_INSTANCE` so their tools address the manager that launched
-them. Existing unbound sessions can use the exchange's unique authorized selection without
+them; a tool's `instance` argument must name that same manager. The `cotal` commands run from their
+shell select it too, unless `--on` names another instance. Existing unbound sessions can use the exchange's unique authorized selection without
 replacing their actor or conversation. The connector uses a separate control connection; the
 standing message connection and its credential source are unchanged. Accepted spawn goals are
 followed on that renewing connection, using its existing caller-scoped progress grant, so a long
