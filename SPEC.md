@@ -4880,6 +4880,21 @@ owner on resume. Grant construction and effect dispatch MUST use the same triple
 owner token is not admission evidence. The existing static/local path retains its `local` owner.
 These identity rules do not authorize exporting host mediator or operator credentials to a driver.
 
+A run that names an explicit placement instance gains instance-rail reach on that one instance
+only: `describe`, `resolve-cwd` and `spawn`, and owner-mode `turn` pinned to the run's own owner.
+A placed seat is mapped only by the instance hosting it, so the host MUST address that seat's turns
+to its placement instance, never the class rail. Static/local issuance adds no instance row when
+the program has no placement. Auth-service-issued mediators retain their admitted host-instance
+placement (§14.8), including for an unplaced program; unplaced seats still use the class rail.
+On that rail a target-unmapped refusal (§13.3) states only that the members a call reached hold no
+mapping, not that the seat is down.
+
+Unanswered pinned-host discovery before submission, with no accepted goal recorded, reports
+that host unreachable (L4002). Permission and contract refusals retain their own meaning. A
+reply lost after submission remains governed by goal reconciliation.
+A migration keeps the original seat's recorded host through its new binding and later takeover.
+A receiving placement request cannot move that seat or invent a host missing from older records.
+
 ### 14.2 The language and its version
 
 Programs, values, primitives, the step key grammar, the input hash, the request id and the entry
