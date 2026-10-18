@@ -161,8 +161,8 @@
       "file": "packages/core/src/run-driver-grants.ts",
       "find": "export const PLACEMENT_COMMANDS: readonly string[] = Object.freeze([\"describe\", \"resolve-cwd\", \"spawn\"]);",
       "replace": "export const PLACEMENT_COMMANDS: readonly string[] = Object.freeze([\"describe\", \"spawn\"]);",
-      "expectRed": "an explicit placement target mints the instance rail for exactly describe, resolve-cwd and spawn",
-      "cell": "an explicit placement target mints the instance rail for exactly describe, resolve-cwd and spawn",
+      "expectRed": "an explicit placement target mints the instance rail for exactly describe, resolve-cwd, spawn and the caller-owner turn",
+      "cell": "an explicit placement target mints the instance rail for exactly describe, resolve-cwd, spawn and the caller-owner turn",
       "note": "REMOVES A REQUIRED GRANT (design: 'mutants that remove a required grant'). The credential still mints and every other row is identical, so only the cell that counts the pinned operations notices.",
       "command": "pnpm --filter @cotal-ai/core build && pnpm smoke:runtime-mesh-spawn",
       "afterRestore": "pnpm --filter @cotal-ai/core build"
