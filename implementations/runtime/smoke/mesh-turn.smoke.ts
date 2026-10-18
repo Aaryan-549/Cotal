@@ -1080,6 +1080,19 @@ if (!placedHostOnly) {
         && String((checkpointGone as { message?: string })?.message).includes(`placed host ${MGR_IID} unreachable`)
         && turnInvokes.length === before + 2 && decoyRuns === 0,
       JSON.stringify({ checkpointGone, invokes: turnInvokes.length - before, decoyRuns }));
+    // These are attributed refusal controls at the resolver I/O seam, not silence.
+    const resolver = handler as unknown as { manager(host?: string): Promise<never> };
+    const originalManager = resolver.manager;
+    try {
+      for (const [code, tag] of [["permission-denied", "Q19deny"], ["failed-precondition", "Q19contract"]] as const) {
+        const refusal = new EpEnvelopeError(code, `fixture ${code}`);
+        resolver.manager = async () => { throw refusal; };
+        const refused = placedSeat === undefined ? undefined : await safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token(tag)).ctx));
+        c(`19r ${code}: a real refusal retains its code and submits nothing`,
+          (refused as { code?: string })?.code === code && turnInvokes.length === before + 2 && decoyRuns === 0,
+          JSON.stringify(refused));
+      }
+    } finally { resolver.manager = originalManager; }
   } finally {
     await decoy.stop().catch(() => { /* teardown */ });
     await hostServe.stop().catch(() => { /* teardown */ });
@@ -1095,7 +1108,7 @@ async function readGoalResultData(goalId: string): Promise<Record<string, unknow
 await Promise.allSettled(terminals);
 await serve.stop().catch(() => { /* teardown */ });
 await nc.close();
-const EXPECTED_CELLS = placedHostOnly ? 9 : 58;
+const EXPECTED_CELLS = placedHostOnly ? 11 : 60;
 const ran = ok + fail;
 console.log(`mesh-turn.smoke: ${ok} passed, ${fail} failed`);
 if (ran !== EXPECTED_CELLS) {

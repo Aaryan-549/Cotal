@@ -4889,6 +4889,12 @@ placement (§14.8), including for an unplaced program; unplaced seats still use 
 On that rail a target-unmapped refusal (§13.3) states only that the members a call reached hold no
 mapping, not that the seat is down.
 
+Unanswered pinned-host discovery before submission, with no accepted goal recorded, reports
+that host unreachable (L4002). Permission and contract refusals retain their own meaning. A
+reply lost after submission remains governed by goal reconciliation.
+A migration keeps the original seat's recorded host through its new binding and later takeover.
+A receiving placement request cannot move that seat or invent a host missing from older records.
+
 ### 14.2 The language and its version
 
 Programs, values, primitives, the step key grammar, the input hash, the request id and the entry

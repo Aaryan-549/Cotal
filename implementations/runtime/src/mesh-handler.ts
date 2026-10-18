@@ -272,6 +272,16 @@ export class MeshHandler {
     return this.managerService;
   }
 
+  /** A silent pinned describe before submission is host reachability evidence, not seat death. */
+  private async relayManagerBeforeSubmit(host: string | undefined, ref: GoalRef, kind: "turn" | "ask" | "checkpoint", label: string): Promise<ResolvedService> {
+    try { return await this.manager(host); }
+    catch (err) {
+      if (host !== undefined && unansweredRequest(err) && (await readGoalStatus(await this.actionCtx(), ref)) === undefined)
+        throw new EffectError("L4002", kind, `${label}: placed host ${host} unreachable`);
+      throw err;
+    }
+  }
+
   /**
    * One manager call, with a SPEC 13.2 bind refusal REPAIRED rather than raised
    * ({@link invokeRepairingSplit}).
@@ -1359,6 +1369,11 @@ export class MeshHandler {
       typeof recorded?.goalId === "string" && (recorded.goalId === goalId || typeof recorded.adoptedFrom === "string")
         ? recorded
         : undefined;
+    const checkRecordedPlacement = (floor: Readonly<Record<string, unknown>> | undefined): void => {
+      if (req.placement !== undefined && floor?.host !== req.placement.instanceId)
+        throw new EffectError("L4000", "spawn", `spawn(${req.persona}) requested placement ${req.placement.instanceId} but the accepted seat's recorded host is ${typeof floor?.host === "string" ? floor.host : "unrecorded"}; an adopted or resumed seat cannot be moved by a new request`);
+    };
+    if (ext !== undefined) checkRecordedPlacement(ext);
     // A budget this host cannot meter is refused before anything is submitted: accepting it and
     // enforcing nothing would be the silent no-op the effect table exists to prevent.
     const permits = req.permits !== undefined ? readPermits(req.permits, req.persona) : undefined;
@@ -1380,9 +1395,11 @@ export class MeshHandler {
         throw new Error(`spawn(${req.persona}): the migrated seat's entry carries no readable handle or goal; a garbled hand-over is refused rather than minted over`);
       if (req.worktree !== undefined && handle.worktree !== req.worktree)
         throw new Error(`spawn(${req.persona}) asks for worktree "${req.worktree}" but the seat the migration hands it holds ${handle.worktree === undefined ? "none" : `"${handle.worktree}"`}; an adopted seat keeps its tree, so the edited program names that tree or none`);
+      checkRecordedPlacement(floor);
       ext = {
         goalId: adopted.requestId,
         ...(floor !== undefined ? pickAcceptanceFloor(floor) : {}),
+        ...(typeof floor?.host === "string" ? { host: floor.host } : {}),
         ...(handle.worktree !== undefined ? { worktree: handle.worktree } : {}),
         ...(req.onFork !== undefined ? { onFork: req.onFork } : {}),
         ...(req.permits !== undefined ? { permits: req.permits } : {}),
@@ -1474,7 +1491,7 @@ export class MeshHandler {
         ...(address !== undefined ? { owner: address.owner, actor: address.actor } : {}),
         ...(permits !== undefined ? { permits } : {}),
         ...(typeof ext.spawnedAt === "number" ? { spawnedAt: ext.spawnedAt } : {}),
-        ...(req.placement !== undefined ? { host: req.placement.instanceId } : {}),
+        ...(typeof ext.host === "string" ? { host: ext.host } : {}),
       });
       if (typeof handle.worktree === "string")
         this.worktreeHolders.set(handle.worktree, { name: parseAgentHandle(handle.agent).name, uid: parseAgentHandle(handle.agent).uid });
@@ -1584,13 +1601,19 @@ export class MeshHandler {
           throw new EffectError("L4001", "permit-wall-clock", `turn(${name}#${uid}): a ${deadlineMs}ms deadline runs past the agent's remaining wall clock (${remaining}ms of its ${entry.permits.wallClockMs}ms permit)`);
       }
       const payload = JSON.stringify({ run: this.binding.runId, step, context, noticeIds: notices.map((n) => n.noticeId) });
-      const submit = async (): Promise<EpAttributedReply> =>
-        this.invokeManager(await this.manager(host), "turn",
+      let submitted = false;
+      const submit = async (): Promise<EpAttributedReply> => {
+        const service = submitted ? await this.manager(host)
+          : await this.relayManagerBeforeSubmit(host, ref, "turn", `turn(${name}#${uid})`);
+        // After invocation may have run, retain the existing goal reconciliation.
+        submitted = true;
+        return this.invokeManager(service, "turn",
           { payload, deadlineMs, ...(handoffFrom !== undefined ? { handoffFrom } : {}) }, {
             id: goalId,
             deadlineMs: TURN_ACCEPT_DEADLINE_MS,
             target: { mode: "owner", owner, actor, lifecycleUid: uid },
           });
+      };
 
       let reply: EpAttributedReply | undefined;
       try {
@@ -1989,9 +2012,10 @@ export class MeshHandler {
     const ref: GoalRef = { endpoint: this.binding.endpoint, caller: this.binding.caller, goalId };
     const actx = await this.actionCtx();
     if ((await readGoalStatus(actx, ref)) !== undefined) return;
+    const service = await this.relayManagerBeforeSubmit(seat.host, ref, kind, `${kind}(${step})`);
     let reply: EpAttributedReply;
     try {
-      reply = await this.invokeManager(await this.manager(seat.host), "turn",
+      reply = await this.invokeManager(service, "turn",
         { payload, deadlineAt }, {
           id: goalId,
           deadlineMs: TURN_ACCEPT_DEADLINE_MS,
