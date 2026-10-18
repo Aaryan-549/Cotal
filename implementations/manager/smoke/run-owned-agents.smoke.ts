@@ -101,8 +101,11 @@ if (subcommand === "tool-seat") {
         catch (error) { return { isError: true, text: error instanceof Error ? error.message : String(error) }; }
       };
       // The seat's own shell, as when it runs a rendered `cotal run …` command: the environment it was launched with.
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      for (const key of Object.keys(env)) if (key.startsWith("COTAL_")) delete env[key];
+      Object.assign(env, { COTAL_HOME: process.env.MC_CLI_HOME!, COTAL_SPACE: config.space, COTAL_MANAGER_INSTANCE: config.managerInstanceId, COTAL_SKIP_CONNECTOR_SEED: "1" });
       const shell = (args: string[]) => new Promise<Record<string, unknown>>((done) => execFile(process.execPath, [...process.execArgv, join(import.meta.dirname, "..", "..", "..", "bin", "cotal.ts"), ...args],
-        { env: { ...process.env, COTAL_SKIP_CONNECTOR_SEED: "1" }, timeout: 60_000 },
+        { env, timeout: 60_000 },
         (error, stdout, stderr) => done({ code: error ? (typeof error.code === "number" ? error.code : -1) : 0, stdout: stdout.slice(0, 1500), stderr: stderr.slice(0, 1500) })));
       trace({ kind: "pin-run-ps", ...await call(tool, { verb: "ps" }) });
       trace({ kind: "pin-cli-run-ps", ...await shell(["run", "ps", "--space", config.space]) });
@@ -315,7 +318,7 @@ try {
       const env: Record<string, string> = {};
       for (const key of ["PATH", "HOME", "TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "COTAL_SKIP_CONNECTOR_SEED"]) if (process.env[key]) env[key] = process.env[key]!;
       return { command: process.execPath, args: [...process.execArgv, self, o.name.startsWith("tool") ? "tool-seat" : "seat"], env: { ...env, COTAL_SPACE: o.space, COTAL_SERVERS: servers, COTAL_OWNER: o.userAuth.owner, COTAL_ACTOR: o.userAuth.actor, COTAL_NAME: o.name, COTAL_LIFECYCLE_UID: o.lifecycleUid, COTAL_SENTINEL_CREDS: o.userAuth.sentinelCredsPath, COTAL_BEARER_CMD: JSON.stringify(o.userAuth.bearerCmd), COTAL_MANAGER_INSTANCE: state.instanceId, COTAL_CAPABILITIES: (o.capabilities ?? []).join(","), U4_TRACE: tracePath, MC_RELEASE: releasePath, MC_CONTROL: controlPath,
-        ...(o.name === "toolpin" ? { COTAL_HOME: cliHome, MC_OTHER_INSTANCE: otherInstance! } : {}) } };
+        ...(o.name === "toolpin" ? { COTAL_HOME: cliHome, MC_CLI_HOME: cliHome, MC_OTHER_INSTANCE: otherInstance! } : {}) } };
     },
   };
   registry.register(connector);

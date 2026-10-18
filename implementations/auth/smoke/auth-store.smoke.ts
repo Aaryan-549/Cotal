@@ -302,8 +302,11 @@ try {
     mkdirSync(dir);
     const readies = urls.map((_, i) => join(root, `idp-race-${name}.ready-${i}`));
     const runs = urls.map((url, i) => new Promise<{ ok: boolean; url?: string; message?: string }>((resolve, reject) => {
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      for (const key of Object.keys(env)) if (key.startsWith("COTAL_")) delete env[key];
+      env.COTAL_AUTHSTORE_IDP_RACE = JSON.stringify({ dir, url, ready: readies[i], go });
       const child = spawn(tsx, [fileURLToPath(import.meta.url)], {
-        env: { ...process.env, COTAL_AUTHSTORE_IDP_RACE: JSON.stringify({ dir, url, ready: readies[i], go }) },
+        env,
         stdio: ["ignore", "pipe", "inherit"],
       });
       let out = "";
