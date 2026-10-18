@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -116,6 +116,20 @@ async function child(): Promise<void> {
     // A resumed session is a session start, so it reports its directory again.
     await sessionStart(b, "resume", moved);
     check("hosted_dir_resume_reports", await until("resume", () => cwdOf(b.name) === moved), { got: cwdOf(b.name) });
+
+    // The card keeps the harness's pathname bytes. A real directory whose name has a space inside and
+    // at its end is a different directory from its trimmed sibling, and the card names the one the
+    // hook reported. An empty cwd names no directory, so it leaves the snapshot alone.
+    const spaced = join(root, "spaced project "), plain = join(root, "spaced project");
+    mkdirSync(spaced, { mode: 0o700 }); mkdirSync(plain, { mode: 0o700 });
+    check("hosted_dir_spaced_and_plain_are_distinct_dirs", statSync(spaced).ino !== statSync(plain).ino);
+    await sessionStart(a, "resume", spaced);
+    check("hosted_dir_spaced_barrier_seen", await barrier());
+    check("hosted_dir_trailing_space_bytes_kept", cwdOf(a.name) === spaced, { got: cwdOf(a.name), want: spaced });
+    check("hosted_dir_spaced_sibling_untouched", cwdOf(b.name) === moved, { got: cwdOf(b.name) });
+    await sessionStart(a, "resume", "");
+    check("hosted_dir_empty_barrier_seen", await barrier());
+    check("hosted_dir_empty_cwd_keeps_snapshot", cwdOf(a.name) === spaced, { got: cwdOf(a.name) });
 
     // Lifetime: once A closes, its socket takes no more frames and B's card is untouched.
     await a.session?.close(); a.session = undefined;
