@@ -4375,11 +4375,14 @@ export class CotalEndpoint extends EventEmitter {
    *  `undefined` means the key IS NOT THERE — a definite absence, established by a completed read.
    *  A read that could not be completed THROWS instead, so a caller can tell "it is gone" from "I could
    *  not find out". That distinction is the whole point of the method: a renew that got no answer has
-   *  proved nothing, and only a definite answer here may be acted on. */
-  async readOwnManagerLease(instanceId: string): Promise<{ info: ManagerLeaseInfo; revision: number } | undefined> {
+   *  proved nothing, and only a definite answer here may be acted on.
+   *
+   *  `created` is the broker's write time of the row (epoch ms), which is what the bucket TTL counts
+   *  from. */
+  async readOwnManagerLease(instanceId: string): Promise<{ info: ManagerLeaseInfo; revision: number; created: number } | undefined> {
     const e = await (await this.managerLeaseRegistry()).get(managerLeaseKey(instanceId));
     if (!e || e.operation !== "PUT") return undefined;
-    return { info: JSON.parse(new TextDecoder().decode(e.value)) as ManagerLeaseInfo, revision: e.revision };
+    return { info: JSON.parse(new TextDecoder().decode(e.value)) as ManagerLeaseInfo, revision: e.revision, created: e.created.getTime() };
   }
   /** Release THIS instance's key on clean shutdown so a same-id restart re-acquires immediately. CAS-guarded
    *  by `revision`: if we already LOST it (renew gap) the stored revision has moved, the conditional delete
