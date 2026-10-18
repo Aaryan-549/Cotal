@@ -68,21 +68,18 @@ async function dm(opened: Awaited<ReturnType<typeof openTransient>>, positionals
     process.exit(1);
   }
   const { ep, space } = opened;
-  // Presence arrives asynchronously after connect; poll briefly (≤2s) for the target to appear.
-  // resolvePeer is fail-loud: an exact id or a unique name resolves, a same-name collision throws.
+  // The roster was read once when the endpoint started. resolvePeer is fail-loud: an exact id or a
+  // unique name resolves, a same-name collision throws.
   let peer: Presence | undefined;
-  for (let i = 0; i < 20 && !peer; i++) {
-    try {
-      peer = resolvePeer(ep.getRoster(), target);
-    } catch (e) {
-      if (!(e instanceof AmbiguousPeerError)) throw e;
-      console.error(c.red(`"${target}" is ambiguous - DM by instance id instead:`));
-      for (const cand of e.candidates)
-        console.error(c.dim(`  ${cand.name} (${cand.status})  ${cand.id}`));
-      await ep.stop();
-      process.exit(1);
-    }
-    if (!peer) await new Promise((r) => setTimeout(r, 100));
+  try {
+    peer = resolvePeer(ep.getRoster(), target);
+  } catch (e) {
+    if (!(e instanceof AmbiguousPeerError)) throw e;
+    console.error(c.red(`"${target}" is ambiguous - DM by instance id instead:`));
+    for (const cand of e.candidates)
+      console.error(c.dim(`  ${cand.name} (${cand.status})  ${cand.id}`));
+    await ep.stop();
+    process.exit(1);
   }
   if (!peer) {
     console.error(c.red(`no agent "${target}" present in space ${space}`));

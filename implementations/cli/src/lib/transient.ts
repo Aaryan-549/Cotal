@@ -26,8 +26,10 @@ export async function resolveConnect(values: ConnectValues): Promise<Connection>
   return connectOrExit(values, "operator");
 }
 
-/** Open a transient endpoint: it watches presence (so name→id resolution and the live roster work)
- *  but never registers itself, binds no inbox, and consumes no channels. The caller stops it. */
+/** Open a transient endpoint: it reads presence and the channel registry once at start (so name→id
+ *  resolution and the roster work) but never registers itself, binds no inbox, consumes no channels,
+ *  and binds no watch consumer, so a stopped one leaves nothing on the broker (#4091). The caller
+ *  stops it. */
 export async function openTransient(
   values: ConnectValues,
   name: string,
@@ -41,6 +43,7 @@ export async function openTransient(
     consume: false,
     registerPresence: false,
     watchPresence: true,
+    readOnce: true,
     // Display name only. The wire principal comes from the resolved static credential or user
     // bearer; on an open mesh the endpoint self-mints it. Process environment never supplies
     // authority for an operator command.

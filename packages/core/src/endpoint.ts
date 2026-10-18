@@ -46,7 +46,7 @@ import type { EpCaller, IssuedCaller } from "./endpoint-subjects.js";
 import { assertIdToken, assertGeneration } from "./endpoint-subjects.js";
 import { readAcceptedRow } from "./issued-authority.js";
 import type { EpVerbTarget, EpAttributedReply } from "./endpoint-verbs.js";
-import { liveKvEntries } from "./kv-scan.js";
+import { lastKvEntries, liveKvEntries } from "./kv-scan.js";
 import { isJetStreamMissing } from "./jetstream-missing.js";
 import { ARTIFACT_PART_KIND, isArtifactPart } from "./artifact.js";
 import { assertValidName } from "./resolve.js";
@@ -301,6 +301,15 @@ export interface EndpointOptions {
    *  cache — so its cred needs no channel-registry read grant (residual 2). No effect when `consume` is
    *  true: the join-time replay decision reads the registry, so a consumer always opens it. */
   watchChannels?: boolean;
+  /** Read presence and the channel registry ONCE at start instead of watching them (default false),
+   *  for an endpoint that does one thing and stops (`cotal send`, a roster probe). Each read is one
+   *  Direct Get of every key's last record, so it binds no consumer. A watch's ordered consumer
+   *  outlives {@link CotalEndpoint.stop} by the broker's five-minute inactive threshold, because the
+   *  operator and agent profiles hold no CONSUMER.DELETE on these buckets (#691), and one per
+   *  short-lived process piles up until the broker refuses new consumers there (#4091). The roster
+   *  and the channel cache hold the state at start and never update, and no sweep runs. A bucket of
+   *  more than 1024 keys refuses the read. Requires `consume` and `registerPresence` false. */
+  readOnce?: boolean;
   /** Create inbound stream consumers (DM / chat / anycast). Default true; a pure observer sets false. */
   consume?: boolean;
   /** Initial per-channel attention overrides to publish in presence from the first heartbeat (the
@@ -475,6 +484,7 @@ export class CotalEndpoint extends EventEmitter {
   private readonly doRegister: boolean;
   private readonly doWatch: boolean;
   private readonly doWatchChannels: boolean;
+  private readonly readOnce: boolean;
   private readonly doConsume: boolean;
   private readonly ackWaitMs: number;
   private readonly inactiveThresholdMs: number;
@@ -898,6 +908,9 @@ export class CotalEndpoint extends EventEmitter {
     this.doWatch = opts.watchPresence ?? true;
     this.doWatchChannels = opts.watchChannels ?? true;
     this.doConsume = opts.consume ?? true;
+    this.readOnce = opts.readOnce ?? false;
+    if (this.readOnce && (this.doConsume || this.doRegister))
+      throw new Error("EndpointOptions.readOnce requires consume and registerPresence false: a one-time read cannot keep a consumer's channel cache or its own presence current");
     // Seed the presence mirror so file-default channel modes are visible from the first publish
     // (not only after the first runtime toggle). Mirror only — delivery reads the connector's state.
     this.channelModes = opts.channelModes && Object.keys(opts.channelModes).length ? opts.channelModes : undefined;
@@ -1449,7 +1462,8 @@ export class CotalEndpoint extends EventEmitter {
         : await kvm.create(presenceBucket(this.space), { ttl: this.ttlMs, storage: PRESENCE_STORAGE });
     }
 
-    if (this.doWatch) {
+    if (this.doWatch && this.readOnce) await this.readPresenceOnce();
+    else if (this.doWatch) {
       await this.startPresenceWatch();
       this.sweepTimer = setInterval(
         () => this.sweep(),
@@ -1465,7 +1479,7 @@ export class CotalEndpoint extends EventEmitter {
     const watchChannels = this.doWatch && this.doWatchChannels;
     if (watchChannels || this.doConsume) {
       this.channelKv = await openChannelRegistry(this.nc, this.space, { create: !this.authed });
-      if (watchChannels) await this.startChannelWatch();
+      if (watchChannels) await (this.readOnce ? this.readChannelsOnce() : this.startChannelWatch());
     }
 
     // Rebind the daemon's lease-loss watch onto the fresh connection (#1596). The intent survived
@@ -6444,6 +6458,17 @@ export class CotalEndpoint extends EventEmitter {
     return info;
   }
 
+  /** {@link EndpointOptions.readOnce}: fill the roster from one read of the presence bucket. Stale
+   *  and offline records resolve as they do in a watch's initial replay. */
+  private async readPresenceOnce(): Promise<void> {
+    if (!this.kv) return;
+    for (const e of await lastKvEntries(this.kv)) this.handleKvEntry(e);
+    this.presenceSnapshotPopulated = true;
+    // No record reached the roster (an empty bucket, or only the TTL canary): nobody is present.
+    if (this.lastPresenceWatchAt === 0) this.markPresenceBucketEmpty();
+    else this.emitPresenceViewIfChanged();
+  }
+
   /**
    * Replace a presence watch that has gone silent past TTL while the connection is up. The new
    * ordered consumer starts from the bucket's current last-per-subject state, so a peer that is
@@ -6505,6 +6530,12 @@ export class CotalEndpoint extends EventEmitter {
     void (async () => {
       for await (const e of iter) this.handleChannelEntry(e);
     })().catch((e) => this.emit("error", e as Error));
+  }
+
+  /** {@link EndpointOptions.readOnce}: fill the channel cache from one read of the registry. */
+  private async readChannelsOnce(): Promise<void> {
+    if (!this.channelKv) return;
+    for (const e of await lastKvEntries(this.channelKv)) this.handleChannelEntry(e);
   }
 
   private handleChannelEntry(e: KvEntry): void {

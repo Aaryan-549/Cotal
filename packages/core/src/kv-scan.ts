@@ -339,6 +339,38 @@ export async function walkKvLatest(kv: KV, filter: string): Promise<KvEntry[]> {
   return [...latest.values()];
 }
 
+/**
+ * The last entry of every key in `kv`, DEL and PURGE markers included, read WITHOUT a consumer.
+ *
+ * One batched Direct Get (`multi_last` over the whole bucket) answers in a single round trip however
+ * many keys there are. It exists for short-lived readers that must leave nothing on the broker when
+ * they exit: a watch's or a scan's consumer outlives its reader by the five-minute inactive threshold
+ * nats.js gives it whenever the reader's profile holds no CONSUMER.DELETE (#691), and one per process
+ * piles up until the broker refuses new consumers on the bucket (#4091).
+ *
+ * The broker answers at most 1024 keys and refuses a larger bucket with "too many results" rather
+ * than truncating, so the error reaches the caller. Each delivered message reports how many are still
+ * behind it, so a batch that stops early (its request timed out after a dropped link) throws
+ * {@link IncompleteKvScan} instead of returning a short list.
+ */
+export async function lastKvEntries(kv: KV): Promise<KvEntry[]> {
+  if (!(kv instanceof Bucket))
+    throw new Error(`lastKvEntries needs the @nats-io/kv Bucket implementation to address its backing stream (got ${kv?.constructor?.name ?? typeof kv})`);
+  const bucket: Bucket = kv;
+  // Not gated on `bucket.direct`: `kvm.open` binds without reading the stream, so that flag holds the
+  // caller's open options, not the stream's `allow_direct`. A stream without it has no Direct Get
+  // responder and the request fails.
+  const iter = await bucket.jsm.direct.getLastMessagesFor(bucket.stream, { multi_last: [`${bucket.prefix}.>`] });
+  const out: KvEntry[] = [];
+  let pending = 0;
+  for await (const sm of iter) {
+    out.push(bucket.smToEntry(sm));
+    pending = sm.pending;
+  }
+  if (pending !== 0) throw new IncompleteKvScan(bucket.bucket, out.length, out.length + pending);
+  return out;
+}
+
 /** {@link liveKvEntries}, decoded. `decode` returning `undefined` drops the entry — for callers that
  *  skip garbled records rather than failing the whole read (the prevailing convention in the
  *  registries: one unparseable row must not blind the surface to every other row). */

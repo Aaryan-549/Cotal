@@ -1456,7 +1456,9 @@ export function permissionsFor(
     `$JS.API.CONSUMER.INFO.${DLV}.${dlvD}`,
     `$JS.API.CONSUMER.MSG.NEXT.${DLV}.${dlvD}`,
     `$JS.ACK.${DLV}.${dlvD}.>`,
-    // Presence: watch (read, public roster) + flow control + PUT OWN KEY ONLY.
+    // Presence: watch (read, public roster) + flow control + PUT OWN KEY ONLY. The bare DIRECT.GET is
+    // the batched one-time read a user-mode `cotal send` makes on this bearer (#4091): the same roster.
+    `$JS.API.DIRECT.GET.${KV}`,
     `$JS.API.CONSUMER.CREATE.${KV}.>`,
     `$JS.API.CONSUMER.INFO.${KV}.>`,
     // No CONSUMER.DELETE here or on the registry below: the watch's `oc_<nuid>_<serial>` name
@@ -1464,8 +1466,10 @@ export function permissionsFor(
     // rebuild's refused predecessor delete leaves that consumer to the broker's inactive threshold.
     "$JS.FC.>",
     `$KV.${presenceBucket(space)}.${pk.key}`, // own presence key (owner+actor) only — can't spoof peers
-    // Channel registry: read-only (watch + direct kv.get for the join-time replay decision).
+    // Channel registry: read-only (watch, the batched one-time read, and direct kv.get for the
+    // join-time replay decision).
     // No `$KV.${channelBucket(space)}.*` publish — privileged-write, default-deny gives that free.
+    `$JS.API.DIRECT.GET.${CHKV}`,
     `$JS.API.STREAM.MSG.GET.${CHKV}`,
     `$JS.API.CONSUMER.CREATE.${CHKV}.>`,
     `$JS.API.CONSUMER.INFO.${CHKV}.>`,
@@ -1829,14 +1833,18 @@ function operatorPermissions(space: string, pr: MintPrincipal): Record<string, u
         anycastSubject(space, "*", pr.owner, pr.actor), // svc.*.<o>.<a>   — anycast any role as me
         `$KV.${presenceBucket(space)}.${principalKey(pr.owner, pr.actor).key}`, // own presence key only
         "$JS.API.INFO",
-        // Presence watch (name→id resolution + the live roster) — read-only ordered consumer. No
-        // STREAM.MSG.GET (the roster is the in-memory watch cache).
+        // Presence read (name→id resolution + the roster). The transient endpoint reads the bucket once
+        // with a batched Direct Get, whose request subject is the bare stream (#4091); the consumer rows
+        // serve a watch. No STREAM.MSG.GET.
         `$JS.API.STREAM.INFO.${PKV}`,
+        `$JS.API.DIRECT.GET.${PKV}`,
         `$JS.API.CONSUMER.CREATE.${PKV}.>`,
         `$JS.API.CONSUMER.INFO.${PKV}.>`,
-        // Channel registry read — the transient endpoint opens+watches it, and multicast reads a
-        // channel's delivery class. Read-only (no `$KV.<channel>` write — that's the provisioner).
+        // Channel registry read — the transient endpoint reads it once (batched Direct Get), multicast
+        // reads a channel's delivery class, and `channels list` scans it. Read-only (no `$KV.<channel>`
+        // write — that's the provisioner).
         `$JS.API.STREAM.INFO.${CHKV}`,
+        `$JS.API.DIRECT.GET.${CHKV}`,
         `$JS.API.STREAM.MSG.GET.${CHKV}`,
         // Keyed KV get rides `DIRECT.GET.<stream>.$KV.<bucket>.<key>` — the key is in the SUBJECT, so
         // the grant needs the trailing `.>` (unlike STREAM.MSG.GET, which carries it in the payload).
