@@ -7,7 +7,8 @@
  * own build time by `@cotal-ai/core/browser-validators-build` for the endpoint contracts it calls.
  * A closure digest is the closure's identity, so the generated validator for a digest IS that
  * closure's validator. A cluster or closure the host did not generate refuses as
- * `unsupported-version` before anything is sent: never compiled, guessed or skipped.
+ * `unsupported-version` before any command is sent: never compiled, guessed or skipped. The read-only
+ * `describe` that names those digests has already run; no command, and so no mutation, follows it.
  *
  * Authority stays the host's: it passes its own connection (`wsconnect`, its current credentials)
  * and the caller it was issued. This entry mints, persists and selects nothing, and never retries.
@@ -18,6 +19,10 @@ import type { EpAttributedReply, EpVerbTarget } from "./endpoint-call.js";
 import { EpEnvelopeError, replyRefusedBeforeEffect } from "./endpoint-error.js";
 import type { EpCaller } from "./endpoint-subjects.js";
 import type { CompiledContract } from "./schema-profile.js";
+
+// The stock classifiers, from THIS entry's own module instance: a host that imported them from the
+// package root would hold a second EpEnvelopeError class, and `instanceof` would miss every error.
+export { EpEnvelopeError, unansweredRequest, replyRefusedBeforeEffect } from "./endpoint-error.js";
 
 /** One validator emitted by the build-time generator (Ajv standalone, the §13.7 profile options). */
 export type BrowserValidator = ((data: unknown) => boolean) & { errors?: Array<{ instancePath?: string; message?: string }> | null };
