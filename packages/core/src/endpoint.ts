@@ -2826,6 +2826,17 @@ export class CotalEndpoint extends EventEmitter {
     await this.publishPresence();
   }
 
+  /** Overlay the session's working directory onto the card's display-only `meta.cwd`, then
+   *  republish presence. For connectors that learn the directory from the harness after launch (e.g.
+   *  Claude Code's `SessionStart` hook) rather than from their own process. Advisory display data,
+   *  never a routing or access input. */
+  async setCardCwd(cwd: string): Promise<void> {
+    const c = cwd.trim();
+    if (!c || this.card.meta?.cwd === c) return;
+    this.card.meta = { ...(this.card.meta ?? {}), cwd: c };
+    await this.publishPresence();
+  }
+
   // ---- channel discovery ---------------------------------------------------
 
   /** This channel's registry config from the live local cache (undefined if unset). */

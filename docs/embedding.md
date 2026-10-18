@@ -85,7 +85,10 @@ Shared connector sessions report `card.meta.host` and `card.meta.cwd` from the c
 when the session is constructed. They override agent-file values and are advisory display data.
 The directory is a startup snapshot, not a model harness's later shell directory. Neither field
 changes routing or access, and the connector reads no command-line arguments or environment dump
-for these values.
+for these values. A connector whose process can host several sessions passes
+`{ withholdProcessCwd: true }` as `MeshAgent`'s third argument and reports each session's directory
+with `setCwd` (`CotalEndpoint.setCardCwd`) once the harness supplies it; until then the field is
+absent. Claude Code sessions do this from their `SessionStart` hook.
 
 **Daemon runners and lifecycle**
 
