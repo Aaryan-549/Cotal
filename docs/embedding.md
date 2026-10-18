@@ -75,8 +75,9 @@ See [the issuance design](design/user-auth-run-start.md#platform-supervisor-regi
 Everything below is a real export of a published package, reachable from the package root (each
 package publishes `.` via `dist/index.{js,d.ts}` and ships `files: ["dist"]`).
 `@cotal-ai/connector-claude-code` also publishes `./mcp`, which hosts managed Claude Code sessions
-in one process ([Connect Claude](connect-claude.md#host-sessions-in-one-process)). Type-only names
-are marked; import them with `import type`.
+in one process ([Connect Claude](connect-claude.md#host-sessions-in-one-process)).
+`@cotal-ai/core` also publishes `./browser-control` and `./browser-validators-build`
+([Browser control](#browser-control)). Type-only names are marked; import them with `import type`.
 
 `CotalEndpoint` accepts `environment` as an explicit presence label. Pass `null` to omit the label
 without reading `COTAL_ENVIRONMENT`. Omitting the option preserves the process environment default.
@@ -309,6 +310,17 @@ gateway then signals that connection again when the embedder calls the function 
 received, which it does when a client starts listening. `cotal_connect` adds `wake.listening()` to
 its reply. `GATEWAY_INSTRUCTIONS` is `GATEWAY_CONNECTING` followed by `GATEWAY_LISTENING`, so an
 embedder can say how its conversations listen and keep how they connect.
+
+### Browser control
+
+`@cotal-ai/core/browser-control` describes and invokes an endpoint from a strict-CSP page. The page
+compiles no code: the host passes validators it generated at build time with
+`generateBrowserContracts` from `@cotal-ai/core/browser-validators-build` (Node only). The generator
+takes each cluster document with its recorded digest and schema roots, recomputes every digest and
+refuses a mismatch or a missing root before writing anything. It supports single-document closures
+only, so a command whose closure spans several documents refuses. The generated module imports
+Ajv's runtime helpers (`ajv/dist/runtime/*.js`), so the host's bundler must resolve `ajv` from
+where the host writes that module.
 
 ### Remote manager client composition
 
