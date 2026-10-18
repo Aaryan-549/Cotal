@@ -261,7 +261,28 @@ export async function join(args: ParsedArgs): Promise<void> {
 
   const who = (card: { name: string; role?: string }) => c.bold(peerLabel(card));
 
+  // A post on a durable channel reaches this session twice under one id: once on the live channel
+  // subscription and once from the Plane-3 backstop. SPEC §4 makes the receiver deduplicate by id,
+  // so each id prints once. An empty id asserts no identity and is never a key. Two rotating
+  // windows bound the memory, the same shape the connector's ingest uses.
+  let printedIds = new Set<string>();
+  let printedIdsPrev = new Set<string>();
+  const alreadyPrinted = (id: string): boolean => {
+    if (id === "") return false;
+    if (printedIds.has(id) || printedIdsPrev.has(id)) return true;
+    printedIds.add(id);
+    if (printedIds.size >= 4096) {
+      printedIdsPrev = printedIds;
+      printedIds = new Set();
+    }
+    return false;
+  };
+
   ep.on("message", (m: CotalMessage, d: Delivery) => {
+    if (alreadyPrinted(m.id)) {
+      d.ack(); // the other path's copy of a message already printed
+      return;
+    }
     const text = partsToText(m.parts);
     if (m.to === me)
       print(`${c.magenta("(DM)")} ${who(m.from)} ${c.dim("→ you:")} ${text}`);
