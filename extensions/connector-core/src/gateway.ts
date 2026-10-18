@@ -20,7 +20,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
 import { assertValidName } from "@cotal-ai/core";
-import { cotalToolSpecs, parseToolArgs, type ToolResult } from "./tool-specs.js";
+import { cotalToolSpecs, parseToolArgs, type CotalToolSpec, type ToolResult } from "./tool-specs.js";
 import type { MeshAgent } from "./agent.js";
 import type { AgentConfig } from "./config.js";
 
@@ -81,6 +81,19 @@ export const GATEWAY_TOOLS: ReadonlySet<string> = new Set([
 /** How many names `cotal_connect` tries: the requested one, then `_2` up to this suffix. */
 export const GATEWAY_NAME_ATTEMPTS = 20;
 
+/** The longest `cotal_wait` holds one call when the embedder sets no bound, in seconds. A held call
+ *  has to end before anything in front of the gateway does. The reply is one JSON body, so its first
+ *  byte goes out when the wait ends: Claude Code gives a remote server 60 seconds to that byte,
+ *  Cloudflare ends an origin response after about 100, and claude.ai ends a tool call after 240. */
+export const GATEWAY_WAIT_SECONDS = 50;
+
+/** How an embedder tunes the surface for what sits in front of it. */
+export interface GatewayOptions {
+  /** The longest `cotal_wait` may hold one call, in whole seconds. Defaults to
+   *  {@link GATEWAY_WAIT_SECONDS}. Keep it under every proxy and client timeout on the path. */
+  waitSeconds?: number;
+}
+
 /** The names `cotal_connect` tries for `base`, in order. */
 export function gatewayNames(base: string, attempts = GATEWAY_NAME_ATTEMPTS): string[] {
   return [base, ...Array.from({ length: attempts - 1 }, (_, i) => `${base}_${i + 2}`)];
@@ -126,14 +139,104 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Focus @mentions per agent since a gateway read last cleared them. In `focus` an @mention is
+ *  acked at ingest and recalled by the next `cotal_inbox`, so nothing buffered marks it, and one
+ *  that arrives between two waits would otherwise end neither. */
+const focusMentions = new WeakMap<MeshAgent, { count: number }>();
+
+/** `agent`'s focus @mention count, counted from the first time the gateway asks. Attention reaches
+ *  `focus` only through a gateway call, and every call asks, so the count starts in time. */
+function mentionsOf(agent: MeshAgent): { count: number } {
+  let mentions = focusMentions.get(agent);
+  if (!mentions) {
+    const m = { count: 0 };
+    agent.on("mention-wake", () => (m.count += 1));
+    focusMentions.set(agent, (mentions = m));
+  }
+  return mentions;
+}
+
+/** What should wake a gateway connection: {@link MeshAgent.inboxWake}, the rule a local seat's push
+ *  follows (direct messages, role requests and @mentions always, other channel traffic only in
+ *  `open`), plus the focus @mentions it has not read. */
+function wakeCount(agent: MeshAgent): number {
+  return agent.inboxWake() + mentionsOf(agent).count;
+}
+
 /**
- * Register the remote surface on `server`: `cotal_connect`, `cotal_disconnect`, and each tool in
- * {@link GATEWAY_TOOLS} with a required `connection_id`.
+ * Resolve true once `agent` has something that should wake it, or false after `ms`, on abort, or
+ * when the agent stops.
+ *
+ * The SDK aborts `signal` when the request's connection closes, so a wait its client gave up on
+ * stops listening instead of taking the next message to a closed socket. The signal belongs to that
+ * one request, so its listener ends with the request and needs no removal. The handler awaits the
+ * host first, so the signal can already be aborted and the agent already stopped here, and neither
+ * then fires an event.
+ */
+function waitForWake(agent: MeshAgent, ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted || agent.stopping) return Promise.resolve(false);
+  if (wakeCount(agent) > 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const check = () => {
+      if (wakeCount(agent) > 0) finish(true);
+    };
+    const mentioned = () => finish(true);
+    const stopped = () => finish(false);
+    const abort = () => finish(false);
+    const timer = setTimeout(() => finish(false), ms);
+    function finish(woke: boolean) {
+      clearTimeout(timer);
+      agent.off("incoming", check);
+      agent.off("mention-wake", mentioned);
+      agent.off("stopping", stopped);
+      resolve(woke);
+    }
+    agent.on("incoming", check);
+    agent.on("mention-wake", mentioned);
+    agent.on("stopping", stopped);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+/** Run `spec` for a connection with the request's signal, so a read whose client is gone clears
+ *  nothing. A `cotal_inbox` read that clears also clears the focus @mention count, since its recall
+ *  carries them. */
+async function runFor(spec: CotalToolSpec, c: GatewayConnection, args: Record<string, unknown>, signal: AbortSignal): Promise<ToolResult> {
+  const result = await spec.run(c.agent, c.config, parseToolArgs(spec, args), { signal });
+  if (spec.name === "cotal_inbox" && !args.peek && !signal.aborted) mentionsOf(c.agent).count = 0;
+  return result;
+}
+
+/** The line every routed tool except `cotal_inbox` adds when messages are waiting, so a
+ *  conversation that never polls still learns of them on its next call. */
+function waitingNotice(agent: MeshAgent): { type: "text"; text: string } | undefined {
+  const n = wakeCount(agent);
+  if (!n) return undefined;
+  return { type: "text", text: `${n} new message${n === 1 ? "" : "s"} waiting. Read ${n === 1 ? "it" : "them"} with cotal_inbox.` };
+}
+
+/**
+ * Register the remote surface on `server`: `cotal_connect`, `cotal_disconnect`, `cotal_wait`, and
+ * each tool in {@link GATEWAY_TOOLS} with a required `connection_id`.
  *
  * Each call is parsed and run against the spec built from that connection's own configuration, so a
  * connection's channels and grants decide what the call does.
+ *
+ * A remote MCP client gives the server no way to start a turn, so a conversation hears a message
+ * only when it calls a tool. `cotal_wait` is the call that listens: it holds until a message
+ * arrives and then returns it, and every other routed tool says when messages are waiting.
  */
-export function registerCotalGatewayTools(server: McpServer, host: GatewayHost, source = "gateway"): void {
+export function registerCotalGatewayTools(
+  server: McpServer,
+  host: GatewayHost,
+  source = "gateway",
+  options: GatewayOptions = {},
+): void {
+  const waitSeconds = options.waitSeconds ?? GATEWAY_WAIT_SECONDS;
+  if (!Number.isInteger(waitSeconds) || waitSeconds < 1) {
+    throw new Error(`waitSeconds must be a whole number of seconds, at least 1; got ${waitSeconds}`);
+  }
+
   server.registerTool(
     "cotal_connect",
     {
@@ -196,6 +299,51 @@ export function registerCotalGatewayTools(server: McpServer, host: GatewayHost, 
     },
   );
 
+  server.registerTool(
+    "cotal_wait",
+    {
+      title: "Cotal: wait for a message",
+      description:
+        `Wait for a message to this connection, and return it as cotal_inbox would. It returns at once when one is ` +
+        `already waiting, and otherwise as soon as one arrives, or after at most ${waitSeconds} seconds with none. ` +
+        "Call it again to keep listening. Direct messages, role requests and @mentions always end the wait; other " +
+        "channel traffic ends it only in open attention (cotal_status sets attention).",
+      inputSchema: z.strictObject({
+        connection_id: CONNECTION_ID,
+        seconds: z
+          .number()
+          .int()
+          .min(1)
+          .max(waitSeconds)
+          .optional()
+          .describe(`The longest to wait, in seconds. Defaults to ${waitSeconds}, the most allowed.`),
+      }),
+    },
+    async ({ connection_id, seconds }, extra) => {
+      let account: string;
+      try {
+        account = host.account(extra.authInfo);
+      } catch (e) {
+        return refuse(`not authenticated: ${errorText(e)}`);
+      }
+      const c = await host.find(account, connection_id);
+      if (!c) return refuse(CONNECTION_REQUIRED);
+      const inbox = cotalToolSpecs(c.config, source, undefined, GATEWAY_TOOLS).find((s) => s.name === "cotal_inbox");
+      if (!inbox) return refuse("cotal_wait is not available on this connection.");
+      const limit = seconds ?? waitSeconds;
+      const woke = await waitForWake(c.agent, limit * 1000, extra.signal);
+      if (c.agent.stopping) return refuse(CONNECTION_REQUIRED);
+      if (!woke) {
+        return toContent({ text: `No new messages in ${limit} second${limit === 1 ? "" : "s"}. Call cotal_wait again to keep listening.` });
+      }
+      try {
+        return toContent(await runFor(inbox, c, {}, extra.signal));
+      } catch (e) {
+        return refuse(errorText(e));
+      }
+    },
+  );
+
   for (const spec of cotalToolSpecs(ADVERTISED, source, undefined, GATEWAY_TOOLS)) {
     const channel = spec.name === "cotal_send" ? (spec.schema.shape.channel as z.ZodType | undefined) : undefined;
     const shape = channel ? spec.schema.extend({ channel: channel.describe(SEND_CHANNEL) }) : spec.schema;
@@ -219,11 +367,15 @@ export function registerCotalGatewayTools(server: McpServer, host: GatewayHost, 
         const own = cotalToolSpecs(c.config, source, undefined, GATEWAY_TOOLS).find((s) => s.name === spec.name);
         // Unreachable while GATEWAY_TOOLS holds no capability-gated tool; a future one refuses here.
         if (!own) return refuse(`${spec.name} is not available on this connection.`);
+        let result: ReturnType<typeof toContent>;
         try {
-          return toContent(await own.run(c.agent, c.config, parseToolArgs(own, rest)));
+          result = toContent(await runFor(own, c, rest, extra.signal));
         } catch (e) {
-          return refuse(errorText(e));
+          result = refuse(errorText(e));
         }
+        // cotal_inbox already says what it left buffered.
+        const notice = spec.name === "cotal_inbox" ? undefined : waitingNotice(c.agent);
+        return notice ? { ...result, content: [...result.content, notice] } : result;
       },
     );
   }
@@ -233,7 +385,9 @@ export function registerCotalGatewayTools(server: McpServer, host: GatewayHost, 
 export const GATEWAY_INSTRUCTIONS =
   "Cotal connects this conversation to the person's Cotal space. Call cotal_connect once with a short name " +
   "for this conversation, then pass the returned connection_id on every other cotal tool call. Each " +
-  "conversation needs its own connection. Never reuse another conversation's connection_id.";
+  "conversation needs its own connection. Never reuse another conversation's connection_id. Messages " +
+  "reach you only when you call a tool: to listen, call cotal_wait, which returns as soon as a message " +
+  "arrives, and call it again to keep listening.";
 
 /** One HTTP request to a gateway endpoint. */
 export interface GatewayRequest {
@@ -248,6 +402,8 @@ export interface GatewayRequest {
   /** The source tag on messages this endpoint sends. */
   source?: string;
   instructions?: string;
+  /** See {@link GatewayOptions.waitSeconds}. */
+  waitSeconds?: number;
 }
 
 /**
@@ -258,7 +414,7 @@ export interface GatewayRequest {
  * The endpoint is stateless. Each POST gets a fresh server and transport and a JSON response, so
  * nothing survives between requests except what the host stores. There is no server-initiated
  * stream and no session to end, so every other method answers 405, as the Streamable HTTP
- * transport allows.
+ * transport allows. A `cotal_wait` call holds its POST open for up to `waitSeconds`.
  */
 export async function handleGatewayRequest(host: GatewayHost, r: GatewayRequest): Promise<void> {
   if (r.req.method !== "POST") {
@@ -268,7 +424,7 @@ export async function handleGatewayRequest(host: GatewayHost, r: GatewayRequest)
     return;
   }
   const server = new McpServer({ name: "cotal", version: "0.0.0" }, { instructions: r.instructions ?? GATEWAY_INSTRUCTIONS });
-  registerCotalGatewayTools(server, host, r.source);
+  registerCotalGatewayTools(server, host, r.source, r.waitSeconds === undefined ? {} : { waitSeconds: r.waitSeconds });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   r.res.on("close", () => {
     void transport.close();
