@@ -6487,6 +6487,9 @@ export class Manager {
           }
         }
       }
+      // An unsupervised seat a successor could adopt keeps a record too; one that cannot be written
+      // costs only that adoption, so the spawn stands and the line says so.
+      if (!managed.restart?.policy) this.refreshSeatRecord(managed);
       this.watchExit(managed);
       // Reply with the id the slot actually carries (user-mode: the owner.actor principal —
       // presence, ps, and the manifest ownership ledger all key on it; the throwaway static nkey
@@ -9471,24 +9474,28 @@ export class Manager {
   }
 
   /** Persist what a successor needs to take this seat back if this process ends without stopping
-   *  it: today a supervised seat, which a successor restarts (#4094). Static meshes only: a successor
-   *  finds the seat through its active slot row, and only a static mesh keeps one. Throws when the
-   *  entry could not be resumed, because a policy this host cannot keep across a manager restart is
-   *  one it cannot enforce. */
+   *  it: a supervised seat, which a successor restarts (#4094), and a seat on a runtime that can adopt
+   *  it by reference, which a successor adopts while it still runs (#4095). Static meshes only: a
+   *  successor finds the seat through its active slot row, and only a static mesh keeps one. Throws
+   *  when a supervised seat's entry could not be resumed, because a policy this host cannot keep
+   *  across a manager restart is one it cannot enforce. */
   private recordSeat(a: ManagedAgent): void {
-    const restart = a.restart;
-    if (!restart?.policy || !this.auth || this.userMode) return;
+    if (!this.auth || this.userMode) return;
+    const policy = a.restart?.policy;
+    const adoptable = a.handle.reference !== undefined && typeof this.requiredRuntime.adopt === "function";
+    if (!policy && !adoptable) return;
     const agent = this.resumeEntryOf(a);
-    const unresumable = this.inventoryReferenceError(agent);
-    if (unresumable) throw new Error(`a successor manager could not restart it: ${unresumable}`);
-    writeSeatRecord(this.workspaceRoot, { version: "cotal-seat-record/v1", instanceId: this.managerInstanceId, supervise: restart.policy, crashes: restart.crashes, agent });
+    if (policy) {
+      const unresumable = this.inventoryReferenceError(agent);
+      if (unresumable) throw new Error(`a successor manager could not restart it: ${unresumable}`);
+    }
+    writeSeatRecord(this.workspaceRoot, { version: "cotal-seat-record/v1", instanceId: this.managerInstanceId, ...(policy ? { supervise: policy } : {}), crashes: a.restart?.crashes ?? [], agent });
   }
 
   /** Bring a running seat's record up to date after its credential or restart count changed. A
    *  record that cannot be rewritten is removed, so a successor retires the seat rather than taking
    *  it back from a stale one. */
   private refreshSeatRecord(a: ManagedAgent): void {
-    if (!a.restart?.policy) return;
     try {
       this.recordSeat(a);
     } catch (error) {
@@ -9524,6 +9531,78 @@ export class Manager {
       return undefined;
     }
     return record;
+  }
+
+  /** Take back a seat that outlived its manager (#4095): the runtime reattaches to the exact seat
+   *  the slot names, and this manager holds it under the record's identity and launch, with no
+   *  relaunch. Returns why it could not, and the caller then retires the lifecycle, which reaps the
+   *  seat by the same reference. */
+  private async adoptSeat(row: StaticManagedSlotRow, record: SeatRecord): Promise<string | undefined> {
+    const entry = record.agent;
+    if (entry.identity.mode !== "static") return "its record is not a static identity";
+    if (row.runtime === undefined) return "its slot names no seat";
+    const runtime = this.requiredRuntime;
+    if (typeof runtime.adopt !== "function") return `runtime "${runtime.kind}" cannot adopt a seat`;
+    // The credential is the manager's own lifecycle-keyed file, and its seed renews it.
+    const credsPath = resolve(entry.identity.credential.path);
+    if (credsPath !== resolve(agentLifecycleSecretFilePaths(this.workspaceRoot, this.space, entry.name, entry.identity.lifecycleUid).creds))
+      return `its credential reference ${credsPath} is not this lifecycle's manager-owned path`;
+    const stored = await this.secrets.get(agentSecretKeyForFile(credsPath, this.space));
+    if (stored === undefined) return "its credential is not in the secret store";
+    let seed: string;
+    try {
+      const identity = identityFromCreds(stored);
+      if (identity.id !== entry.identity.id) return `its credential is identity ${identity.id}, not ${entry.identity.id}`;
+      seed = identity.seed;
+    } catch (error) {
+      return `its credential is unreadable: ${rejectionText(error)}`;
+    }
+    let adopted: AgentHandle;
+    try {
+      adopted = runtime.adopt(row.runtime);
+    } catch (error) {
+      return `the seat ${row.runtime.kind}:${row.runtime.id} could not be adopted: ${rejectionText(error)}`;
+    }
+    const managed: ManagedAgent = {
+      name: entry.name,
+      role: entry.role,
+      agent: entry.launch.connector,
+      id: entry.identity.id,
+      seed,
+      ...(entry.identity.issued ? { issued: entry.identity.issued } : {}),
+      lifecycleUid: entry.identity.lifecycleUid,
+      secretPaths: { creds: entry.identity.credential.path },
+      spawner: entry.spawner,
+      authorityParent: entry.authorityParent,
+      startedAt: Date.parse(entry.startedAt),
+      // The runtime names an adopted handle by what it holds; the record names the seat.
+      handle: { ...adopted, name: entry.name },
+      launch: {
+        source: entry.launch.source,
+        cwd: entry.launch.cwd,
+        model: entry.launch.model,
+        variant: entry.launch.variant,
+        subscribe: entry.launch.subscribe,
+        allowSubscribe: entry.launch.allowSubscribe,
+        allowPublish: entry.launch.allowPublish,
+        capabilities: entry.launch.capabilities,
+        events: entry.launch.events,
+        shareTools: entry.launch.shareTools,
+        forkSource: entry.launch.forkSource,
+        ...(entry.launch.resumed ? { resumed: entry.launch.resumed } : {}),
+        sessionId: entry.launch.sessionId,
+        unresolvedLaunchOptionKeys: entry.launch.unresolvedLaunchOptionKeys,
+      },
+    };
+    this.agents.set(entry.name, managed);
+    this.watchExit(managed);
+    console.error(`! ${entry.name}: adopted the seat its previous manager left (${row.runtime.kind}:${row.runtime.id})`);
+    // A credential that came close to its expiry while no manager ran is renewed now, not at the
+    // next pass.
+    const health = inspectCredHealth(stored).state;
+    if (health === "near-expiry" || health === "expired")
+      await this.renewManagedStaticCred(managed).catch((error) => console.error(`! managed cred renewal ${entry.name}: ${rejectionText(error)} - the agent dies loud at this cred's expiry unless it is reminted`));
+    return undefined;
   }
 
   /** Restart a supervised seat whose manager ended without stopping it (#4094), as one restart of
@@ -10021,8 +10100,9 @@ export class Manager {
           deferredSlots++;
           continue;
         }
-        // A boot after this instance's manager ended without stopping its seats: a supervised seat
-        // with a record is restarted under its own policy instead of retired (#4094).
+        // A boot after this instance's manager ended without stopping its seats: a seat with a record
+        // is taken back instead of retired, restarted under its policy when supervised (#4094) and
+        // adopted while it still runs otherwise (#4095).
         if (!postAdoption && row.phase === "active" && !adopted) {
           const record = this.seatRecordFor(row);
           if (record) {
@@ -10040,12 +10120,15 @@ export class Manager {
         // Restarts run first; one that cannot restart joins the terminals below.
         for (const { row, record } of restartRows) {
           if (this.staticReconcileStopping) break;
-          const refusal = await this.restartSupervisedSeat(row, record);
+          // A supervised seat is restarted; any other seat is adopted while it still runs.
+          const refusal = record.supervise ? await this.restartSupervisedSeat(row, record) : await this.adoptSeat(row, record);
           if (refusal === undefined) {
             this.reconcilingAliases.delete(row.alias);
             continue;
           }
-          console.error(`! ${row.alias}: the supervised seat its previous manager left was not restarted (${refusal}); retiring the lifecycle`);
+          console.error(record.supervise
+            ? `! ${row.alias}: the supervised seat its previous manager left was not restarted (${refusal}); retiring the lifecycle`
+            : `! ${row.alias}: the seat its previous manager left was not adopted (${refusal}); retiring the lifecycle`);
           this.dropSeatRecord({ name: row.alias, lifecycleUid: row.lifecycleUid });
           terminalRows.push(row);
         }
