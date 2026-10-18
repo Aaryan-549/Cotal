@@ -1050,7 +1050,7 @@ if (!placedHostOnly) {
     // class responder still maps nothing, and must never become a fallback.
     if (placedKey !== undefined && placedAlloc !== undefined)
       mappings.set(placedKey, { lifecycleUid: placedAlloc.uid, mappingRevision: 1 });
-    await hostServe.stop();
+    if (acceptedThenLost === 0) await hostServe.stop();
     await nc.flush();
     c("19d setup: the placed host is stopped while its seat mapping remains",
       placedKey !== undefined && mappings.has(placedKey) && turnInvokes.length === before + 2 && decoyRuns === 0);
