@@ -4883,9 +4883,11 @@ These identity rules do not authorize exporting host mediator or operator creden
 A run that names an explicit placement instance gains instance-rail reach on that one instance
 only: `describe`, `resolve-cwd` and `spawn`, and owner-mode `turn` pinned to the run's own owner.
 A placed seat is mapped only by the instance hosting it, so the host MUST address that seat's turns
-to its placement instance, never the class rail. An unplaced run keeps class-rail reach and gains no
-instance row. On the class rail a target-unmapped refusal (§13.3) states only that the members a
-call reached hold no mapping, not that the seat is down.
+to its placement instance, never the class rail. Static/local issuance adds no instance row when
+the program has no placement. Auth-service-issued mediators retain their admitted host-instance
+placement (§14.8), including for an unplaced program; unplaced seats still use the class rail.
+On that rail a target-unmapped refusal (§13.3) states only that the members a call reached hold no
+mapping, not that the seat is down.
 
 ### 14.2 The language and its version
 
