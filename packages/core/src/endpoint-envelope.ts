@@ -31,13 +31,19 @@ export const EP_ENVELOPE_V = 1;
 
 const EP_ERROR_SET = new Set<string>(EP_ERROR_CODES);
 
+/** UTF-8 byte length, for every byte bound in this module. The standard `TextEncoder`, not Node's
+ *  `Buffer`: the browser entries parse envelopes too. A lone surrogate counts as the 3-byte U+FFFD
+ *  it encodes to, as `Buffer.byteLength` counted it, so every bound is unchanged. */
+const UTF8 = new TextEncoder();
+const utf8Bytes = (s: string): number => UTF8.encode(s).length;
+
 const LABEL = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
 /** Reverse-DNS extension token: three or more DNS-shaped labels (`com.acme.throttled`). */
 const EXTENSION_CODE = new RegExp(`^${LABEL}(\\.${LABEL}){2,}$`);
 
 /** True iff `code` is a catalog token or a reverse-DNS extension token within the 64-byte bound. */
 export function isEpErrorCode(code: string): boolean {
-  if (typeof code !== "string" || Buffer.byteLength(code, "utf8") > 64) return false;
+  if (typeof code !== "string" || utf8Bytes(code) > 64) return false;
   return EP_ERROR_SET.has(code) || EXTENSION_CODE.test(code);
 }
 
@@ -225,7 +231,7 @@ function pickCorrelation(v: unknown): EpCorrelation | undefined {
   const out: EpCorrelation = {};
   if (o.traceparent !== undefined) {
     const tp = asString(o.traceparent, "correlation.traceparent");
-    if (Buffer.byteLength(tp, "utf8") > MAX_TRACEPARENT_BYTES)
+    if (utf8Bytes(tp) > MAX_TRACEPARENT_BYTES)
       fail("bad-request", `correlation.traceparent exceeds ${MAX_TRACEPARENT_BYTES} bytes`);
     const m = TRACEPARENT.exec(tp);
     if (!m || m[1] === "ff" || /^0+$/.test(m[2]) || /^0+$/.test(m[3]))
@@ -237,7 +243,7 @@ function pickCorrelation(v: unknown): EpCorrelation | undefined {
   for (const k of ["tracestate", "baggage"] as const) {
     if (o[k] === undefined) continue;
     const s = asString(o[k], `correlation.${k}`);
-    if (Buffer.byteLength(s, "utf8") > CORRELATION_BYTE_BOUNDS[k])
+    if (utf8Bytes(s) > CORRELATION_BYTE_BOUNDS[k])
       fail("bad-request", `correlation.${k} exceeds ${CORRELATION_BYTE_BOUNDS[k]} bytes`);
     // eslint-disable-next-line no-control-regex
     if (/[\x00-\x1f\x7f]/.test(s)) fail("bad-request", `correlation.${k} carries a control character`);
@@ -475,7 +481,7 @@ export function parseEndpointEvent(raw: unknown): EndpointEvent {
   const o = asRecord(raw, "event");
   assertVersion(o, "event");
   const topic = asString(o.topic, "topic");
-  if (Buffer.byteLength(topic, "utf8") > 256) fail("bad-request", "topic exceeds 256 bytes");
+  if (utf8Bytes(topic) > 256) fail("bad-request", "topic exceeds 256 bytes");
   const ts = asWireInt(o.ts, "ts");
   if (!("data" in o)) fail("bad-request", "event carries no data field");
   const correlation = pickCorrelation(o.correlation);
