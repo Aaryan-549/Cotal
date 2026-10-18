@@ -165,7 +165,8 @@ login to a remote mesh does not block the software update. Local manager continu
 apply before changing the installation.
 
 Without `--self`, `update` keeps the installed first-party surfaces coherent with the running
-binary: it force-reconciles the four built-in connectors, then reinstalls other `@cotal-ai/*`
+binary: it force-reconciles the four built-in connectors, brings what a connector installed in its
+harness to this release (the `cotal` plugin copy Claude Code sessions load, and its Claude Desktop entry), then reinstalls other `@cotal-ai/*`
 operator extensions at the binary's exact version. Each extension runs in an isolated child, so one
 failure cannot poison later replays. It then checks npm; a newer binary is an informational notice
 with `cotal update --self` as the next command, not an automatic install.
@@ -2718,3 +2719,17 @@ That mode still prints only the raw token and does not update `--health-file`. A
 preflight. When it fails there without printing a sentence of its own, the refusal names the cause: the 30 second
 timeout, the signal that killed it, or its exit code. (`cotal start` is a removed tombstone: it
 errors and points you to `cotal spawn --detach`.)
+
+`cotal app-identity` is plumbing for a Claude app conversation on a local mesh, and you never run it
+directly either. The Claude connector's local server runs `cotal app-identity provision --name <name>`
+when a conversation connects. It picks the mesh as `cotal spawn` does (`--space` selects one), and
+answers `{"ok":false,"taken":true}` when a peer with that name is live, so the server tries another
+name. Otherwise it prints one JSON line: the launch env the connector reads and the reference that
+`retire` takes. The channels and role come from the mesh's default persona. On a mesh with static
+credentials it provisions the identity's own delivery durables and writes its credential to a 0600
+file in a new temporary directory; the credential never appears on stdout. A record beside it names
+the identity, the mesh and the process that asked. `cotal app-identity retire --dir <dir>` removes
+the identity's broker footprint, then the files and the directory. When the broker is not answering
+it keeps them. Each provision also retires the directories whose owning process has exited, which
+covers a host killed before it could retire. A mesh that uses per-user sign-in is refused. Like
+`agent-bearer`, it skips the connector-seed boot gate.
