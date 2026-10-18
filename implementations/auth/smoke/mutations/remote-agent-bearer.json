@@ -46,7 +46,7 @@
     {
       "name": "two live remote manager candidates select the first instead of refusing ambiguity",
       "file": "implementations/auth/src/service.ts",
-      "find": "    if (remoteLive.length > 1)\n      throw new Error(`manager-caller selection found ${remoteLive.length} live remote manager candidates for owner ${owner}; exactly one is required or name --manager-instance`);",
+      "find": "    if (remoteLive.length > 1)\n      throw new Error(`manager-caller selection found ${remoteLive.length} live remote manager candidates for owner ${owner} (${remoteLive.join(\", \")}); exactly one is required, so ${MANAGER_PIN_REMEDY[caller ?? \"wire\"]}`);",
       "replace": "    if (remoteLive.length > 1) return remoteLive[0];",
       "expectRed": "two live remote managers refuse and name the count",
       "command": "pnpm --filter @cotal-ai/core build && pnpm --filter @cotal-ai/auth build && pnpm smoke:remote-exchange:live",

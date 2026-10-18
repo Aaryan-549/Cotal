@@ -9,6 +9,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import {
+  assertLifecycleToken,
   DEFAULT_SPACE,
   DEV_OWNER,
   dialerFor,
@@ -67,7 +68,8 @@ const TARGET_ABSENT_CODES: ReadonlySet<string> = new Set<MeshTargetErrorCode>(["
  *
  * `instanceId` (`--on <instanceId>`) is forwarded to the instrument mint so the one-shot credential
  * carries the exact `ep.inst.…` rows for that instance; a credential cannot gain a rail after it is
- * issued, so it has to arrive here rather than at the invoke.
+ * issued, so it has to arrive here rather than at the invoke. On a user-auth mesh with none, a
+ * managed seat's shell selects the manager that launched it.
  *
  * `onRefusal: "throw"` makes an unresolvable or unreachable mesh a thrown {@link ConnectRefusal}
  * instead of a printed sentence and `process.exit(1)`, for a loop that has to survive the broker
@@ -109,9 +111,12 @@ export async function resolveControlTarget(
     }
     if (mode === "user") {
       const conn = await (opts.onRefusal === "throw" ? connectUserControlOrThrow : connectUserControlOrExit)(withSpace);
+      // A managed seat's own shell defaults to the manager that launched it, as its tools do, so a
+      // second live manager for the owner does not make the seat's calls ambiguous. `--on` wins.
+      const pin = instanceId ?? seatManagerInstance(conn.space);
       const manager = (opts.endpoint === undefined || opts.endpoint === "manager") &&
           (profile === "control-caller-privileged" || profile === "control-caller-admin")
-        ? await userViewAuth(conn, "manager-caller", instanceId === undefined ? {} : { managerInstanceId: instanceId })
+        ? await userViewAuth(conn, "manager-caller", pin === undefined ? {} : { managerInstanceId: pin })
         : undefined;
       return {
         space: conn.space,
@@ -139,6 +144,14 @@ export async function resolveControlTarget(
     ...(conn.mode !== undefined ? { mode: conn.mode } : {}),
     ...(conn.policy ? { policy: conn.policy } : {}),
   };
+}
+
+/** The manager that launched the managed seat this process runs in (`COTAL_MANAGER_INSTANCE`, which
+ *  the manager sets on every launch), when the seat belongs to `space`; `undefined` outside one. */
+function seatManagerInstance(space: string): string | undefined {
+  const instanceId = process.env.COTAL_MANAGER_INSTANCE?.trim();
+  if (!instanceId || process.env.COTAL_SPACE?.trim() !== space) return undefined;
+  return assertLifecycleToken(instanceId, "COTAL_MANAGER_INSTANCE");
 }
 
 /**

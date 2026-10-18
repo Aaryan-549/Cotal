@@ -1242,7 +1242,7 @@ client observes an existing same-host consumer.
 ## models
 
 ```bash
-cotal models [--agent <connector>] [--refresh]
+cotal models [--agent <connector>] [--refresh] [--on <instance>]
 ```
 
 | Flag | Default | Meaning |
@@ -1250,6 +1250,7 @@ cotal models [--agent <connector>] [--refresh]
 | `--space <s>` / `--server <url>` / `--creds <path>` | resolved mesh | Which manager to reach |
 | `--agent <connector>` | all registered connectors | Connector whose catalog to list |
 | `--refresh` | off | Ask the connector to refresh its provider cache |
+| `--on <instance>` | class anycast | Ask one manager instance, by the whole id as `ps` prints it, with the same rules as [`ps`](#managed-seats). On a user-auth mesh where you run more than one live manager, an unpinned call is refused and `--on` picks one |
 
 Asks the running manager for each connector's model catalog (model ids plus their variants)
 for connectors that expose one. OpenCode and Codex query harness/provider surfaces; Jcode reads
@@ -1396,10 +1397,12 @@ address that instance directly. This happens by default; you do not need `--on`.
 
 `--on <instance>` remains the override, for when you already know where the seat lives or the
 lookup itself is degraded. On a **user-auth mesh**, the exchange selects one authorized manager
-for a short-lived `manager-caller` view. `--on` requests a specific instance; without it, selection
-must be unique. Discovery and the command use that instance route. The caller gains no registry
-read or scatter permission. An absent, ambiguous or unauthorized selection refuses before sending
-the command.
+for a short-lived `manager-caller` view. `--on` requests a specific instance. Without it, a command
+run from a managed seat's shell selects the manager that launched the seat (`COTAL_MANAGER_INSTANCE`),
+and any other caller's selection must be unique. Discovery and the command use that instance route.
+The caller gains no registry read or scatter permission. An absent, ambiguous or unauthorized
+selection refuses before sending the command. With several of your managers live, the refusal lists
+their instance ids so you can pass one to `--on`.
 
 A seat is reported as **not found** only when every reachable instance answered for itself. An
 instance that stayed silent past the deadline, or that refused the read rather than answering, said
@@ -2592,12 +2595,12 @@ keyed beta intake; without one it goes to the public `cotal.ai` intake and requi
 Operate durable workflow runs (cotal-lang programs) from the terminal.
 
 ```bash
-cotal run start --file <program> [--timeout <dur>] [--local]
-cotal run resume <runId> [--local --file <program>]
-cotal run ps [--endpoint <ep>] [--json]
-cotal run journal <runId> [--endpoint <ep>] [--json]
-cotal run answer <runId> <stepKey> [--value <json>] [--artifact <ref>] [--endpoint <ep>] [--local --by <who>]
-cotal run amend <runId> <stepKey> [--value <json>] [--artifact <ref>] [--endpoint <ep>] [--local --by <who>]
+cotal run start --file <program> [--timeout <dur>] [--local] [--on <instance>]
+cotal run resume <runId> [--local --file <program>] [--on <instance>]
+cotal run ps [--endpoint <ep>] [--json] [--on <instance>]
+cotal run journal <runId> [--endpoint <ep>] [--json] [--on <instance>]
+cotal run answer <runId> <stepKey> [--value <json>] [--artifact <ref>] [--endpoint <ep>] [--local --by <who>] [--on <instance>]
+cotal run amend <runId> <stepKey> [--value <json>] [--artifact <ref>] [--endpoint <ep>] [--local --by <who>] [--on <instance>]
 cotal run migrate <runId> --local --file <program> [--endpoint <ep>]
 ```
 
@@ -2637,7 +2640,9 @@ only; the manager serves no run-migrate command): it prints whether the migratio
 every orphaned step with its verdict and code, and exits 0 on admissible and non-zero on not. It
 writes nothing: the commit that would file the migration is not reachable yet, and the report
 says so. `--timeout` sets the default
-checkpoint timeout for a drive (default 1h). `--local` drives in this process instead, over one
+checkpoint timeout for a drive (default 1h). `--on <instance>` sends a hosted verb to one manager
+instance, with the same rules as [`ps`](#managed-seats). On a user-auth mesh where you run more than one
+live manager, an unpinned hosted verb is refused and `--on` picks one. `--local` takes no `--on`. `--local` drives in this process instead, over one
 connection per invocation under the run's own credential minted from the project folder's trust
 material, and is the path on a bare broker with no manager or for a run with no recorded program
 (`cotal run resume <runId> --local --file <program>`); `answer --local` and `amend --local` take
