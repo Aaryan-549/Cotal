@@ -716,7 +716,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
     if (remoteLive.length > 1)
       throw new Error(`manager-caller selection found ${remoteLive.length} live remote manager candidates for owner ${owner} (${remoteLive.join(", ")}); exactly one is required, so ${MANAGER_PIN_REMEDY[caller ?? "wire"]}`);
     if (remoteInstances.length > 0)
-      throw new Error(`the remote manager for owner ${owner} is unavailable (${remoteInstances.length} gate${remoteInstances.length === 1 ? "" : "s"}, none live); pass managerInstanceId to select an instance explicitly rather than falling through to the local manager`);
+      throw new Error(`the remote manager for owner ${owner} is unavailable (${remoteInstances.length} gate${remoteInstances.length === 1 ? "" : "s"}, none live); start one with \`cotal supervise\` and retry, as this call is never routed to the local manager`);
     if (localCandidate !== undefined) return localCandidate;
     throw new Error(`manager-caller selection found no manager candidate for owner ${owner}`);
   };

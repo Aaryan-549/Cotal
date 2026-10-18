@@ -1402,7 +1402,8 @@ run from a managed seat's shell selects the manager that launched the seat (`COT
 and any other caller's selection must be unique. Discovery and the command use that instance route.
 The caller gains no registry read or scatter permission. An absent, ambiguous or unauthorized
 selection refuses before sending the command. With several of your managers live, the refusal lists
-their instance ids so you can pass one to `--on`.
+their instance ids so you can pass one to `--on`. When every manager you registered has exited, the
+refusal says to start one with [`supervise`](#supervise); the command is not sent to the local manager.
 
 A seat is reported as **not found** only when every reachable instance answered for itself. An
 instance that stayed silent past the deadline, or that refused the read rather than answering, said
