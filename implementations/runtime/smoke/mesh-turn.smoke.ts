@@ -439,6 +439,9 @@ const spawnSeat = async (handler: MeshHandler, tag: string, persona = "builder")
 const isTurnResult = (v: unknown): v is { status: string; to?: { agent: string }; note?: string; at: number } =>
   v !== null && typeof v === "object" && typeof (v as { status?: unknown }).status === "string" && typeof (v as { at?: unknown }).at === "number";
 
+// Focused placement proof excludes unrelated cancellation and deadline fixtures.
+const placedHostOnly = process.argv.includes("--placed-host");
+if (!placedHostOnly) {
 // ── 1) a driven program turns end to end: the done yield ─────────────────────────────────────
 {
   console.log("• 1 — a driven program turns its agent end to end");
@@ -943,6 +946,8 @@ const isTurnResult = (v: unknown): v is { status: string; to?: { agent: string }
     JSON.stringify({ well, accepts: spawnAccepts.size, before }));
 }
 
+}
+
 // ── 19) a placed seat's turn reaches its placed host, whatever the class rail reaches ─────────
 // Deterministic, not a retry budget: the suite manager (the placed host) stops taking class-rail
 // turns, and a second registered member that maps no seat becomes the only class-rail turn
@@ -1012,6 +1017,39 @@ const isTurnResult = (v: unknown): v is { status: string; to?: { agent: string }
       unmapped && (absentTurn as { code?: string })?.code === "L4002" && String((absentTurn as { message?: string })?.message).includes(`down on its placed host ${MGR_IID}`)
         && turnInvokes.length === before + 1 && decoyRuns === 0,
       JSON.stringify({ unmapped, absentTurn, invokes: turnInvokes.length - before, decoyRuns }));
+    // 19c removed a SEAT mapping. Restore it, then remove the HOST itself: the
+    // class responder still maps nothing, and must never become a fallback.
+    if (placedKey !== undefined && placedAlloc !== undefined)
+      mappings.set(placedKey, { lifecycleUid: placedAlloc.uid, mappingRevision: 1 });
+    await hostServe.stop();
+    await nc.flush();
+    c("19d setup: the placed host is stopped while its seat mapping remains",
+      placedKey !== undefined && mappings.has(placedKey) && turnInvokes.length === before + 1 && decoyRuns === 0);
+    const hostGone = placedSeat === undefined ? undefined
+      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("Q19d")).ctx)), 30_000, "the absent-host turn");
+    c("19d HOST ABSENT: a pre-submit placed turn is catchable L4002 unreachable, never affirmative seat death or class fallback",
+      (hostGone as { code?: string })?.code === "L4002"
+        && String((hostGone as { message?: string })?.message).includes(`placed host ${MGR_IID} unreachable`)
+        && !String((hostGone as { message?: string })?.message).includes("found the agent down")
+        && turnInvokes.length === before + 1 && decoyRuns === 0,
+      JSON.stringify({ hostGone, invokes: turnInvokes.length - before, decoyRuns }));
+    const askGone = placedSeat === undefined ? undefined
+      : await withDeadline(safe(handler.ask({ agent: placedSeat, schema: { answer: "string" }, deadline: "5m" }, stepCtx(token("Q19e")).ctx)), 30_000, "the absent-host ask");
+    c("19e ASK HOST ABSENT: the shipped ask relay reports L4002 placed-host unreachable without submission",
+      (askGone as { code?: string; kind?: string })?.code === "L4002" && (askGone as { kind?: string })?.kind === "ask"
+        && String((askGone as { message?: string })?.message).includes(`placed host ${MGR_IID} unreachable`)
+        && turnInvokes.length === before + 1 && decoyRuns === 0,
+      JSON.stringify({ askGone, invokes: turnInvokes.length - before, decoyRuns }));
+    // Drive the actual shared checkpoint-relay method, not a copied classification rule.
+    const relay = handler as unknown as { relayToSeat(seat: { name: string; uid: string; owner: string; actor: string; host: string }, goalId: string, payload: string, deadlineAt: number, kind: "checkpoint", step: string): Promise<void> };
+    const checkpointGone = placedAlloc === undefined ? undefined : await withDeadline(safe(relay.relayToSeat({
+      name: placedAlloc.name, uid: placedAlloc.uid, owner: placedAlloc.owner, actor: placedAlloc.actor, host: MGR_IID,
+    }, token("Q19f"), "{}", Date.now() + 300_000, "checkpoint", "host-gone")), 30_000, "the absent-host checkpoint relay");
+    c("19f CHECKPOINT HOST ABSENT: the shared shipped relay reports L4002 unreachable without inventing seat death",
+      (checkpointGone as { code?: string; kind?: string })?.code === "L4002" && (checkpointGone as { kind?: string })?.kind === "checkpoint"
+        && String((checkpointGone as { message?: string })?.message).includes(`placed host ${MGR_IID} unreachable`)
+        && turnInvokes.length === before + 1 && decoyRuns === 0,
+      JSON.stringify({ checkpointGone, invokes: turnInvokes.length - before, decoyRuns }));
   } finally {
     await decoy.stop().catch(() => { /* teardown */ });
     await hostServe.stop().catch(() => { /* teardown */ });
@@ -1027,7 +1065,7 @@ async function readGoalResultData(goalId: string): Promise<Record<string, unknow
 await Promise.allSettled(terminals);
 await serve.stop().catch(() => { /* teardown */ });
 await nc.close();
-const EXPECTED_CELLS = 53;
+const EXPECTED_CELLS = placedHostOnly ? 8 : 57;
 const ran = ok + fail;
 console.log(`mesh-turn.smoke: ${ok} passed, ${fail} failed`);
 if (ran !== EXPECTED_CELLS) {
