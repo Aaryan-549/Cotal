@@ -30,6 +30,7 @@ import {
   type ProbeOutcome,
   type ResponderState,
 } from "./liveness.js";
+import { processRuntime } from "./process-runtime.js";
 import { credsClaims, credsFingerprint, credsRenewalDelayMs, idFromCreds } from "./identity.js";
 import { requireBrokerFloor } from "./broker-floor.js";
 import { withDeadline } from "./deadline.js";
@@ -6220,6 +6221,7 @@ export class CotalEndpoint extends EventEmitter {
       // SPEC §6: presence carries the incarnation's lifecycle UID (MUST in auth mode from v0.4);
       // omitted only where the endpoint has none (a pure operator/daemon connection never registers).
       ...(this.ownLifecycleUid !== undefined ? { lifecycleUid: this.ownLifecycleUid } : {}),
+      runtime: processRuntime(),
       status: this.status,
       condition: this.condition,
       environment: this.environment,

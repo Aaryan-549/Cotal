@@ -48,7 +48,11 @@ because an observer that derives `offline` from a stale heartbeat does not know 
 The optional `activitySince` is when the current activity was set. A status change does not move it,
 so an activity left behind while hooks flip the status every turn still shows its age after the
 activity on the same surfaces, such as `(set 9h ago)`. A stamp that is not a finite number shows no
-age. A peer writes its own condition code and activity, so every surface above prints each on one
+age. The optional `runtime` names the process that publishes the record: an opaque per-process
+`id`, the `startedAt` epoch ms that process read from its own clock origin, and `source:
+"endpoint-process"`. Activity, status, heartbeats and in-process reconnects leave it unchanged and a
+new process publishes a new one, so `now - startedAt` is how long a live agent's process has run.
+An offline record keeps it but dates no running time, and an older publisher omits it. A peer writes its own condition code and activity, so every surface above prints each on one
 line, shows a control character or line separator in it as a `\uXXXX` escape, and cuts it at 200
 characters.
 The optional `environment` is an opaque provider reference. Core publishes
