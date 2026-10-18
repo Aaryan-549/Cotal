@@ -952,10 +952,18 @@ const isTurnResult = (v: unknown): v is { status: string; to?: { agent: string }
 {
   console.log("• 19 — a placed seat's turn is addressed to its placed host; the class rail reaches only a member that maps nothing");
   const handler = mk("tn-place");
-  const unplaced = await spawnSeat(handler, "pu");
-  const placedGot = await withDeadline(safe(handler.spawn({ persona: "builder", placement: { endpoint: EP, instanceId: MGR_IID } }, stepCtx(token("pp")).ctx)), 20_000, "the placed spawn");
+  // `token` repeats its tag to 43 characters, so a tag is unique only if no earlier tag repeats to
+  // the same string ("pp" and cell 9's "p" are one request id). A shared id is one goal: the
+  // placed spawn would be served cell 9's recorded acceptance and allocate nothing.
+  const unplaced = await spawnSeat(handler, "Q19u");
+  const allocsBefore = allocations.length;
+  const placedGot = await withDeadline(safe(handler.spawn({ persona: "builder", placement: { endpoint: EP, instanceId: MGR_IID } }, stepCtx(token("Q19p")).ctx)), 20_000, "the placed spawn");
   const placedSeat = typeof (placedGot as { agent?: unknown })?.agent === "string" ? placedGot as { agent: string; persona: string } : undefined;
-  const placedAlloc = allocations.at(-1)!;
+  const placedAlloc = allocations.find((a) => a.uid === placedSeat?.agent.split("#")[1]);
+  c("19 setup: the placed spawn is a fresh allocation by its placed host, not an earlier step's acceptance",
+    placedSeat !== undefined && placedAlloc !== undefined && allocations.length === allocsBefore + 1 && allocations.at(-1) === placedAlloc
+      && unplaced !== undefined && unplaced.agent !== placedSeat.agent,
+    { placed: placedSeat?.agent, unplaced: unplaced?.agent, allocated: allocations.length - allocsBefore });
 
   const DECOY_IID = "d".repeat(26);
   await provisionEndpointGateOpen(authKv, { endpoint: EP, instanceId: DECOY_IID, principal: "local.mgr" });
@@ -985,23 +993,25 @@ const isTurnResult = (v: unknown): v is { status: string; to?: { agent: string }
     const before = turnInvokes.length;
     turnEndings.push({ state: "succeeded", status: "done", delayMs: 200 });
     const placedTurn = placedSeat === undefined ? undefined
-      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("pt")).ctx)), 30_000, "the placed turn");
+      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("Q19t")).ctx)), 30_000, "the placed turn");
     c("19 PLACED: a placed seat's turn is served by its placed host while the class rail reaches only a member that does not map it",
       isTurnResult(placedTurn) && placedTurn.status === "done" && turnInvokes.length === before + 1 && decoyRuns === 0,
       JSON.stringify({ placedTurn, invokes: turnInvokes.length - before, decoyRuns }));
     const unplacedTurn = unplaced === undefined ? undefined
-      : await withDeadline(safe(handler.turn({ agent: unplaced, deadline: "5m" }, stepCtx(token("pv")).ctx)), 60_000, "the unplaced turn");
+      : await withDeadline(safe(handler.turn({ agent: unplaced, deadline: "5m" }, stepCtx(token("Q19v")).ctx)), 60_000, "the unplaced turn");
     c("19b UNPLACED keeps the class rail: its live seat comes back L4002 'down or unreachable', and no member ran it",
       (unplacedTurn as { code?: string })?.code === "L4002" && String((unplacedTurn as { message?: string })?.message).includes("down or unreachable")
         && turnInvokes.length === before + 1 && decoyRuns === 0,
       JSON.stringify({ unplacedTurn, decoyRuns }));
-    mappings.delete(`${placedAlloc.owner}.${placedAlloc.actor}`);
+    // The placed seat itself leaves its host's map: the host is live and answers, and has no seat.
+    const placedKey = placedAlloc === undefined ? undefined : `${placedAlloc.owner}.${placedAlloc.actor}`;
+    const unmapped = placedKey !== undefined && mappings.delete(placedKey) && !mappings.has(placedKey);
     const absentTurn = placedSeat === undefined ? undefined
-      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("pw")).ctx)), 30_000, "the absent placed turn");
+      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("Q19w")).ctx)), 30_000, "the absent placed turn");
     c("19c ABSENT: a seat its placed host no longer maps is L4002 from that host itself, named as its placed host",
-      (absentTurn as { code?: string })?.code === "L4002" && String((absentTurn as { message?: string })?.message).includes(`down on its placed host ${MGR_IID}`)
+      unmapped && (absentTurn as { code?: string })?.code === "L4002" && String((absentTurn as { message?: string })?.message).includes(`down on its placed host ${MGR_IID}`)
         && turnInvokes.length === before + 1 && decoyRuns === 0,
-      JSON.stringify({ absentTurn, decoyRuns }));
+      JSON.stringify({ unmapped, absentTurn, invokes: turnInvokes.length - before, decoyRuns }));
   } finally {
     await decoy.stop().catch(() => { /* teardown */ });
     await hostServe.stop().catch(() => { /* teardown */ });
@@ -1017,7 +1027,7 @@ async function readGoalResultData(goalId: string): Promise<Record<string, unknow
 await Promise.allSettled(terminals);
 await serve.stop().catch(() => { /* teardown */ });
 await nc.close();
-const EXPECTED_CELLS = 52;
+const EXPECTED_CELLS = 53;
 const ran = ok + fail;
 console.log(`mesh-turn.smoke: ${ok} passed, ${fail} failed`);
 if (ran !== EXPECTED_CELLS) {

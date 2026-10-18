@@ -50,8 +50,8 @@
     {
       "name": "the acceptance is never bound as the entry's external state",
       "file": "implementations/runtime/src/mesh-handler.ts",
-      "find": "          ...(req.permits !== undefined ? { permits: req.permits } : {}),\n          spawnedAt: this.now(),\n        };\n        await ctx.bind(ext);",
-      "replace": "          ...(req.permits !== undefined ? { permits: req.permits } : {}),\n          spawnedAt: this.now(),\n        };",
+      "find": "          ...(req.permits !== undefined ? { permits: req.permits } : {}),\n          // The placed instance hosts the seat, and only its resolver maps it: an adopted run\n          // re-addresses this seat's turns there from the journal alone.\n          ...(req.placement !== undefined ? { host: req.placement.instanceId } : {}),\n          spawnedAt: this.now(),\n        };\n        await ctx.bind(ext);",
+      "replace": "          ...(req.permits !== undefined ? { permits: req.permits } : {}),\n          // The placed instance hosts the seat, and only its resolver maps it: an adopted run\n          // re-addresses this seat's turns there from the journal alone.\n          ...(req.placement !== undefined ? { host: req.placement.instanceId } : {}),\n          spawnedAt: this.now(),\n        };",
       "expectRed": "the acceptance floor is bound as the entry's external state before the terminal wait",
       "cell": "the acceptance floor is bound as the entry's external state before the terminal wait",
       "note": "The bind dropped: the live path still completes (the goalId re-derives), but the journal carries no landed-submission marker and no identity floor \u2014 the resume and the uncertain-discharge paths lose their durable input. Measured 2026-09-02: exactly one red, 31 passed. Re-anchored 2026-09-02 (the bind now rides the captured ext the roster registration reads); re-measured: exactly one named red, 31 passed, 1 failed."

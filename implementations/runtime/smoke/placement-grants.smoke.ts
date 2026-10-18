@@ -64,7 +64,7 @@ const MGR_IID = "m".repeat(26);
 const RUN = "pg-run-1";
 const TAKE = "tk000001";
 const CALLER = runDriverCaller(RUN);        // the triple the rows are stamped with
-const EXPECTED_CELLS = 17;
+const EXPECTED_CELLS = 19;
 
 let ok = 0, fail = 0;
 const c = (n: string, v: boolean, extra?: unknown) => { if (v) { ok++; } else { fail++; console.log("  ✗ FAIL:", n, extra ?? ""); } };
@@ -80,6 +80,8 @@ const rowsForCommand = (command: string): string[] =>
 const turnRows = (): string[] =>
   epRequestGrantRows(SPACE, { endpoint: EP, command: "turn", routes: [], instanceId: MGR_IID, target: { mode: "owner", tOwner: CALLER.owner } }, CALLER);
 const SEAT = { actor: "seat1", uid: "s".repeat(26) };
+const OTHER_IID = "o".repeat(26);             // a well-formed instance this run did not place
+const OTHER_OWNER = `u_${"o".repeat(26)}`;    // a well-formed owner that is not the run's
 const placed = (connId: string) => runMediatorGrants(SPACE, { endpoint: EP, runId: RUN, takeoverId: TAKE, instanceId: MGR_IID, epoch: 1, placement: { instanceId: MGR_IID } }, connId);
 const legacy = (connId: string) => runMediatorGrants(SPACE, { endpoint: EP, runId: RUN, takeoverId: TAKE, instanceId: MGR_IID, epoch: 1 }, connId);
 /** The full placement credential minus the rows of ONE placement command. The subtraction is
@@ -308,13 +310,13 @@ try {
 
   console.log("E. PLACED TURN — the placed seat's turn on its placement instance, owner-pinned, nowhere else");
   /** The pinned turn a placed run's host submits (mesh-handler.ts `manager(host)`), over one credential. */
-  const placeTurn = async (user: string, connId: string): Promise<{ stage: string; err?: string }> => {
+  const placeTurn = async (user: string, connId: string, at: { instanceId?: string; owner?: string } = {}): Promise<{ stage: string; err?: string }> => {
     const cnc = await connect({ servers: `nats://127.0.0.1:${PORT}`, user, pass: "pw", inboxPrefix: `_INBOX_${connId}` });
     let stage = "resolve";
     try {
-      const svc = await resolveService(cnc, SPACE, EP, CALLER, { instanceId: MGR_IID });
+      const svc = await resolveService(cnc, SPACE, EP, CALLER, { instanceId: at.instanceId ?? MGR_IID });
       stage = "turn";
-      const r = await invokeCommand(cnc, SPACE, svc, "turn", { payload: user }, { deadlineMs: 8_000, target: { mode: "owner", owner: CALLER.owner, actor: SEAT.actor, lifecycleUid: SEAT.uid } });
+      const r = await invokeCommand(cnc, SPACE, svc, "turn", { payload: user }, { deadlineMs: 8_000, target: { mode: "owner", owner: at.owner ?? CALLER.owner, actor: SEAT.actor, lifecycleUid: SEAT.uid } });
       if (r.reply.ok === false) throw new Error(r.reply.error?.message ?? "refused");
       return { stage: "done" };
     } catch (err) {
@@ -334,6 +336,14 @@ try {
   c("the placed turn rows name only the placement instance and keep the caller-owner target",
     [...PLACED_LIFECYCLE_COMMANDS].join(",") === "turn" && placedRows.length > 0 && placedRows.every((r) => r.includes(`.inst.${EP}.${MGR_IID}.turn.`)) && placedRows.join() === turnRows().join(), placedRows);
   const legacyRows = legacy(connIdFor("unplcd")).publish;
+  const wrongInstance = await placeTurn("full", connIdFor("full"), { instanceId: OTHER_IID });
+  c("WRONG INSTANCE: the placed credential cannot reach an instance the run did not place; the broker refuses there and nothing ran",
+    wrongInstance.stage === "resolve" && wrongInstance.err !== undefined && /REFUSED BY THE BROKER/.test(wrongInstance.err) && wrongInstance.err.includes(OTHER_IID) && turned.length === 1,
+    { wrongInstance, turned });
+  const wrongOwner = await placeTurn("full", connIdFor("full"), { owner: OTHER_OWNER });
+  c("WRONG OWNER: a placed turn whose target names another owner is refused by the broker on the turn rail, and nothing ran",
+    wrongOwner.stage === "turn" && wrongOwner.err !== undefined && /REFUSED BY THE BROKER/.test(wrongOwner.err) && wrongOwner.err.includes(".turn.") && turned.length === 1,
+    { wrongOwner, turned });
   c("an unplaced credential keeps its class turn row and gains no instance turn row",
     legacyRows.some((r) => r.includes(`.one.${EP}.turn.`)) && !legacyRows.some((r) => r.includes(".inst.") && r.includes(".turn.")), legacyRows.filter((r) => r.includes(".turn.")));
 
