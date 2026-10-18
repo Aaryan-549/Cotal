@@ -2706,7 +2706,8 @@ URL because the actor token is the credential in the request body. Because a sea
 bearer refresh, it skips the connector-seed boot gate entirely: it reads one 0600 token file,
 exchanges it and prints the bearer without consulting or writing the operator-global seed store, so
 a newer store generation cannot refuse a live seat's refresh. `--manager-call` asks for the
-instance-bound `manager-caller` view; `--manager-instance <id>` selects an explicit live candidate.
+instance-bound `manager-caller` view; `--manager-instance <id>` selects an explicit live candidate,
+and an owner with more than one live candidate is refused with their ids until it names one.
 That mode still prints only the raw token and does not update `--health-file`. A spawn runs it once as the agent auth
 preflight. When it fails there without printing a sentence of its own, the refusal names the cause: the 30 second
 timeout, the signal that killed it, or its exit code. (`cotal start` is a removed tombstone: it
