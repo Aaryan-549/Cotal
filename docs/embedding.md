@@ -88,7 +88,7 @@ changes routing or access, and the connector reads no command-line arguments or 
 for these values. A connector whose process can host several sessions passes
 `{ withholdProcessCwd: true }` as `MeshAgent`'s third argument and reports each session's directory
 with `setCwd` (`CotalEndpoint.setCardCwd`) once the harness supplies it; until then the field is
-absent. Claude Code sessions do this from their `SessionStart` hook.
+absent. The reported path is kept exactly, whitespace included; an empty string leaves it unchanged. Claude Code sessions do this from their `SessionStart` hook.
 
 **Daemon runners and lifecycle**
 
