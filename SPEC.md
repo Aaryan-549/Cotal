@@ -4880,6 +4880,13 @@ owner on resume. Grant construction and effect dispatch MUST use the same triple
 owner token is not admission evidence. The existing static/local path retains its `local` owner.
 These identity rules do not authorize exporting host mediator or operator credentials to a driver.
 
+A run that names an explicit placement instance gains instance-rail reach on that one instance
+only: `describe`, `resolve-cwd` and `spawn`, and owner-mode `turn` pinned to the run's own owner.
+A placed seat is mapped only by the instance hosting it, so the host MUST address that seat's turns
+to its placement instance, never the class rail. An unplaced run keeps class-rail reach and gains no
+instance row. On the class rail a target-unmapped refusal (§13.3) states only that the members a
+call reached hold no mapping, not that the seat is down.
+
 ### 14.2 The language and its version
 
 Programs, values, primitives, the step key grammar, the input hash, the request id and the entry

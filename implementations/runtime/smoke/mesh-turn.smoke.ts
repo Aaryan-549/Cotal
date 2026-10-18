@@ -943,6 +943,71 @@ const isTurnResult = (v: unknown): v is { status: string; to?: { agent: string }
     JSON.stringify({ well, accepts: spawnAccepts.size, before }));
 }
 
+// ── 19) a placed seat's turn reaches its placed host, whatever the class rail reaches ─────────
+// Deterministic, not a retry budget: the suite manager (the placed host) stops taking class-rail
+// turns, and a second registered member that maps no seat becomes the only class-rail turn
+// responder. A turn on the class rail can reach only that member, which refuses it as unmapped; a
+// turn addressed to the placed host reaches the one manager that maps the seat. The decoy counts
+// every handler entry, so "no other member ran it" is measured, not assumed.
+{
+  console.log("• 19 — a placed seat's turn is addressed to its placed host; the class rail reaches only a member that maps nothing");
+  const handler = mk("tn-place");
+  const unplaced = await spawnSeat(handler, "pu");
+  const placedGot = await withDeadline(safe(handler.spawn({ persona: "builder", placement: { endpoint: EP, instanceId: MGR_IID } }, stepCtx(token("pp")).ctx)), 20_000, "the placed spawn");
+  const placedSeat = typeof (placedGot as { agent?: unknown })?.agent === "string" ? placedGot as { agent: string; persona: string } : undefined;
+  const placedAlloc = allocations.at(-1)!;
+
+  const DECOY_IID = "d".repeat(26);
+  await provisionEndpointGateOpen(authKv, { endpoint: EP, instanceId: DECOY_IID, principal: "local.mgr" });
+  await registerServiceInstance(kv, {
+    space: SPACE,
+    spec: { endpoint: EP, owner: "local", clusterDigests: [CLOSURE_DIGEST], protocol: { v: 1 } },
+    instanceId: DECOY_IID, registrant: { owner: "local" }, authority,
+    barrier: endpointRegistrationBarrier(authKv, SPACE, { endpoint: EP, instanceId: DECOY_IID, opId: DECOY_IID }), readClusterArtifact,
+  });
+  const decoyEpoch = (await serveIssuanceGateKv(authKv, SPACE, { endpoint: EP, instanceId: DECOY_IID }).observe())!.processEpoch;
+  const decoyGrant = await authorizeServeGrant(kv, {
+    space: SPACE, endpoint: EP, instanceId: DECOY_IID, epoch: decoyEpoch,
+    holder: { owner: "local" }, authority, readProcessEpoch: () => decoyEpoch, readClusterArtifact,
+  });
+  let decoyRuns = 0;
+  const decoy = serveEndpoint(nc, SPACE, decoyGrant, defs.map((d) => ({ ...d, handler: () => {
+    decoyRuns += 1;
+    throw new EpEnvelopeError("internal", "the decoy member ran a command");
+  } })), { public: true }, { resolveTarget: () => undefined });
+  await serve.stop();
+  const hostServe = serveEndpoint(nc, SPACE, grant, defs, { public: true }, {
+    resolveTarget: (t) => mappings.get(`${t.owner}.${t.actor}`),
+    omitClassCommands: ["turn"],
+  });
+  await nc.flush();
+  try {
+    const before = turnInvokes.length;
+    turnEndings.push({ state: "succeeded", status: "done", delayMs: 200 });
+    const placedTurn = placedSeat === undefined ? undefined
+      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("pt")).ctx)), 30_000, "the placed turn");
+    c("19 PLACED: a placed seat's turn is served by its placed host while the class rail reaches only a member that does not map it",
+      isTurnResult(placedTurn) && placedTurn.status === "done" && turnInvokes.length === before + 1 && decoyRuns === 0,
+      JSON.stringify({ placedTurn, invokes: turnInvokes.length - before, decoyRuns }));
+    const unplacedTurn = unplaced === undefined ? undefined
+      : await withDeadline(safe(handler.turn({ agent: unplaced, deadline: "5m" }, stepCtx(token("pv")).ctx)), 60_000, "the unplaced turn");
+    c("19b UNPLACED keeps the class rail: its live seat comes back L4002 'down or unreachable', and no member ran it",
+      (unplacedTurn as { code?: string })?.code === "L4002" && String((unplacedTurn as { message?: string })?.message).includes("down or unreachable")
+        && turnInvokes.length === before + 1 && decoyRuns === 0,
+      JSON.stringify({ unplacedTurn, decoyRuns }));
+    mappings.delete(`${placedAlloc.owner}.${placedAlloc.actor}`);
+    const absentTurn = placedSeat === undefined ? undefined
+      : await withDeadline(safe(handler.turn({ agent: placedSeat, deadline: "5m" }, stepCtx(token("pw")).ctx)), 30_000, "the absent placed turn");
+    c("19c ABSENT: a seat its placed host no longer maps is L4002 from that host itself, named as its placed host",
+      (absentTurn as { code?: string })?.code === "L4002" && String((absentTurn as { message?: string })?.message).includes(`down on its placed host ${MGR_IID}`)
+        && turnInvokes.length === before + 1 && decoyRuns === 0,
+      JSON.stringify({ absentTurn, decoyRuns }));
+  } finally {
+    await decoy.stop().catch(() => { /* teardown */ });
+    await hostServe.stop().catch(() => { /* teardown */ });
+  }
+}
+
 async function readGoalResultData(goalId: string): Promise<Record<string, unknown> | undefined> {
   const { readGoalResult } = await import("@cotal-ai/core");
   const fact = await readGoalResult(goalCtx, { endpoint: EP, caller: CALLER, goalId });
@@ -952,7 +1017,7 @@ async function readGoalResultData(goalId: string): Promise<Record<string, unknow
 await Promise.allSettled(terminals);
 await serve.stop().catch(() => { /* teardown */ });
 await nc.close();
-const EXPECTED_CELLS = 49;
+const EXPECTED_CELLS = 52;
 const ran = ok + fail;
 console.log(`mesh-turn.smoke: ${ok} passed, ${fail} failed`);
 if (ran !== EXPECTED_CELLS) {
