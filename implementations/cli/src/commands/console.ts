@@ -1,11 +1,10 @@
 import { writeSync } from "node:fs";
 import { userInfo } from "node:os";
 import { createElement } from "react";
-import { render } from "ink";
 import { chatWildcard, type ParsedArgs } from "@cotal-ai/core";
 import { connectOrExit, userViewAuthOrExit } from "../lib/connect.js";
 import { runLog } from "../render.js";
-import { Root, makeObserver, type ObserverAuth } from "../console/root.js";
+import type { ObserverAuth } from "../console/root.js";
 import type { ControlCtx } from "../console/control.js";
 
 /**
@@ -23,6 +22,11 @@ export async function console_(args: ParsedArgs): Promise<void> {
   // space overview. An explicit --creds wins. USER MODE rides an exchange-gated "admin" VIEW
   // bearer (ledger scope "admin") with a bearer source, same standing shape as `cotal web`.
   const conn = await connectOrExit(values, "admin");
+  // Loaded here, never at module top: index.ts imports this file for every command, and Ink pulls
+  // yoga-layout, whose wasm init is a top-level await. Measured on macOS, that await never settles
+  // once the process starts with a few hundred KB of argv or environment, so a static import made
+  // every command (`cotal send dm <name> <large text>`) exit 13 before it ran (#4088).
+  const { Root, makeObserver } = await import("../console/root.js");
   const user = conn.bearer ? await userViewAuthOrExit(conn, "admin") : undefined;
   const { server, space: resolvedSpace, creds, auth } = conn;
   // Auth/user mode pins its one space; open mode keeps --space (undefined → the overview picker).
@@ -87,6 +91,7 @@ export async function console_(args: ParsedArgs): Promise<void> {
     process.exit(0);
   });
 
+  const { render } = await import("ink");
   const { waitUntilExit } = render(createElement(Root, { server, auth: observerAuth, space, canWrite, canControl, controlCtx, name: operator }), {
     exitOnCtrlC: true,
     maxFps: 30,
