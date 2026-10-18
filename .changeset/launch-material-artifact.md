@@ -1,5 +1,5 @@
 ---
-"@cotal-ai/connector-core": patch
+"@cotal-ai/connector-core": minor
 "@cotal-ai/connector-claude-code": patch
 "@cotal-ai/connector-codex": patch
 "@cotal-ai/connector-hermes": patch
