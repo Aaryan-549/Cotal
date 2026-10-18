@@ -344,6 +344,7 @@
     "smoke:remote-run-revoke": "tsx implementations/auth/smoke/remote-run-revoke.smoke.ts",
     "smoke:managed-run-issuance": "tsx implementations/auth/smoke/managed-run-issuance.smoke.ts",
     "smoke:remote-run-attempt-route": "tsx implementations/auth/smoke/remote-run-attempt-route.smoke.ts",
+    "smoke:issued-caller-expiry": "tsx implementations/auth/smoke/issued-caller-expiry.smoke.ts",
     "smoke:hosted-delivery-lifetime": "tsx implementations/delivery/smoke/hosted-delivery-lifetime.smoke.ts",
     "smoke:hosted-delivery-startup-isolation": "tsx implementations/delivery/smoke/hosted-delivery-startup-isolation.smoke.ts",
     "smoke:remote-ef-accepted-goal": "tsx implementations/manager/smoke/remote-ef-accepted-goal.smoke.ts",
