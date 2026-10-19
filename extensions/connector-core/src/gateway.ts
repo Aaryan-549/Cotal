@@ -315,7 +315,11 @@ export function registerCotalGatewayTools(
           const renamed = candidate === name ? "" : ` (${JSON.stringify(name)} was taken)`;
           const listening = wake ? `\n${wake.listening()}` : "";
           return toContent({
-            text: `Connected as ${c.config.name}${renamed}.\nconnection_id: ${c.id}\nPass this connection_id on every cotal_* call in this conversation.${listening}`,
+            text:
+              `Connected as ${c.config.name}${renamed}.\n` +
+              `connection_id: ${c.id}\n` +
+              `space: ${c.config.space}${c.config.role ? ` · role: ${c.config.role}` : ""}\n` +
+              `Pass this connection_id on every cotal_* call in this conversation. Call cotal_orientation with this connection_id anytime to inspect your bound identity, channels, and tools.${listening}`,
           });
         } catch (e) {
           if (e instanceof NameTaken) continue;

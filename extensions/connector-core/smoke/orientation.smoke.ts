@@ -356,4 +356,57 @@ const presence = (id: string, name: string, role?: string, status = "idle") => (
   assert.equal(realAgent.connectionIssue, undefined, "a recoverable endpoint warning does not become a connection issue");
 }
 
+// 9 — session identity discoverability, principal/lifecycle distinction, replacement currency, and explicit unbound reporting (#4131).
+{
+  assert.match(ORIENTATION_BOOTSTRAP, /never guess.*OS username.*terminal title.*model name/i);
+
+  const predecessor = new MeshAgent(
+    cfg({
+      id: "acme_alice",
+      name: "alice",
+      role: "reviewer",
+      space: "demo",
+      lifecycleUid: "lifecycle000000000000000001",
+      userAuth: { owner: "acme", actor: "alice", sentinelCreds: "SENTINEL", bearer: async () => "tok" },
+    }),
+  );
+  const successor = new MeshAgent(
+    cfg({
+      id: "acme_alice",
+      name: "alice_2",
+      role: "reviewer",
+      space: "demo",
+      lifecycleUid: "lifecycle000000000000000002",
+      userAuth: { owner: "acme", actor: "alice", sentinelCreds: "SENTINEL", bearer: async () => "tok" },
+    }),
+  );
+
+  const predCard = buildOrientation(predecessor, predecessor.config, [], 1);
+  assert.equal(predCard.identity.name, "alice");
+  assert.equal(predCard.identity.principal, "acme.alice");
+  assert.equal(predCard.identity.lifecycleUid, "lifecycle000000000000000001");
+  const predText = renderOrientation(predCard);
+  assert.match(predText, /Session identity — display name: "alice" · role: "reviewer" · space: "demo" · endpoint id: acme\.alice · principal: acme\.alice · lifecycle: lifecycle000000000000000001\./);
+
+  // Even if the tool spec was constructed against the predecessor's config, running it against the
+  // replacement MeshAgent reports the current bound session's display name and lifecycle identity.
+  const orientationTool = cotalToolSpecs(predecessor.config).find((s) => s.name === "cotal_orientation")!;
+  const succResult = await orientationTool.run(successor, predecessor.config, {});
+  assert.match(succResult.text, /display name: "alice_2"/);
+  assert.match(succResult.text, /lifecycle: lifecycle000000000000000002/);
+  assert.doesNotMatch(succResult.text, /lifecycle000000000000000001/);
+
+  await predecessor.stop();
+  const stoppedResult = await orientationTool.run(predecessor, predecessor.config, {});
+  assert.match(stoppedResult.text, /session stopped — this session is no longer bound to the mesh/);
+
+  const unboundCard = buildOrientation(
+    { ...agentStub(), id: "" } as unknown as MeshAgent,
+    cfg({ name: "", role: undefined, space: "" }),
+    [],
+    1,
+  );
+  assert.match(renderOrientation(unboundCard), /Identity: unbound \/ unavailable in this session/);
+}
+
 console.log("✓ orientation smoke passed");

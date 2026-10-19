@@ -18,7 +18,7 @@ import { DOCS_VERSION } from "./docs.js";
  *  connector's system prompt / MCP instructions so every agent — Claude Code, OpenCode, Hermes — is
  *  told to orient first, from a single source of truth. */
 export const ORIENTATION_BOOTSTRAP =
-  "Start with cotal_orientation — it shows your identity, the recorded model pin if one was set, the channels you can read and post to, " +
+  "Start with cotal_orientation — it shows your bound session identity (your Cotal name, role, space, principal, and lifecycle id; never guess these from an OS username, terminal title, model name, or another peer), the recorded model pin if one was set, the channels you can read and post to, " +
   "your capabilities, the tools available to you, and who's present.";
 
 /** Mesh-first steer, folded in alongside {@link ORIENTATION_BOOTSTRAP} for every connector. Keeps
@@ -52,7 +52,16 @@ export interface Orientation {
   /** Snapshot stamp. The live fields below (peers / status / attention / unread) are as of this time;
    *  the identity/access/capabilities/tools fields are static for the session. */
   generatedAt: number;
-  identity: { name: string; role?: string; space: string; id: string; cotalVersion: string; model?: string };
+  identity: {
+    name: string;
+    role?: string;
+    space: string;
+    id: string;
+    principal?: string;
+    lifecycleUid?: string;
+    cotalVersion: string;
+    model?: string;
+  };
   access: {
     /** auth mode → these grants are broker-enforced; open mode → advisory (host-trusted) only. */
     authMode: boolean;
@@ -125,6 +134,7 @@ export function buildOrientation(
   visibleTools: OrientationTool[],
   generatedAt: number,
 ): Orientation {
+  const activeConfig = (agent as { config?: AgentConfig }).config ?? config;
   const core: OrientationTool[] = [];
   const more: OrientationTool[] = [];
   for (const t of visibleTools) {
@@ -140,20 +150,35 @@ export function buildOrientation(
     ? shown.join(", ") + (peers.length > shown.length ? `, +${peers.length - shown.length} more` : "")
     : "no other peers present";
 
+  const epPrincipal = (agent as { ep?: { principal?: { owner?: string; actor?: string } } }).ep?.principal;
+  const owner = activeConfig.userAuth?.owner ?? epPrincipal?.owner;
+  const actor = activeConfig.userAuth?.actor ?? epPrincipal?.actor;
+  const principal = owner && actor ? `${owner}.${actor}` : undefined;
+  const lifecycleUid = activeConfig.lifecycleUid?.trim() || undefined;
+
   return {
     v: 1,
     generatedAt,
-    identity: { name: config.name, role: config.role, space: config.space, id: agent.id, cotalVersion: DOCS_VERSION, ...(config.model ? { model: config.model } : {}) },
+    identity: {
+      name: activeConfig.name,
+      role: activeConfig.role,
+      space: activeConfig.space,
+      id: agent.id,
+      ...(principal ? { principal } : {}),
+      ...(lifecycleUid ? { lifecycleUid } : {}),
+      cotalVersion: DOCS_VERSION,
+      ...(activeConfig.model ? { model: activeConfig.model } : {}),
+    },
     access: {
       // AUTHENTICATED, not "has static creds": a user-auth mesh has no static creds and its grants
       // are broker-enforced, so `!!config.creds` told every agent on one that its grants were
       // advisory and host-trusted. Nothing on the wire corrects a card that misstates the posture.
-      authMode: isAuthed(config),
-      read: config.subscribe,
-      readAcl: config.allowSubscribe,
-      post: config.allowPublish,
+      authMode: isAuthed(activeConfig),
+      read: activeConfig.subscribe,
+      readAcl: activeConfig.allowSubscribe,
+      post: activeConfig.allowPublish,
     },
-    capabilities: config.capabilities ?? [],
+    capabilities: activeConfig.capabilities ?? [],
     tools: { core, more },
     peers: { present: peers.length, summary },
     presence: presenceLiveness(agent),
@@ -172,13 +197,23 @@ export function buildOrientation(
 /** Render the card as compact, glanceable text — the view the model reads. */
 export function renderOrientation(o: Orientation): string {
   const fmt = (cs: string[]) => (cs.length ? cs.map((c) => `#${c}`).join(", ") : "—");
-  const who = peerLabel(o.identity);
+  const hasBoundIdentity = Boolean(o.identity.name?.trim() && o.identity.space?.trim() && o.identity.id?.trim());
+  const who = hasBoundIdentity ? peerLabel(o.identity) : "unbound";
   const aclDiffers =
     o.access.readAcl.length !== o.access.read.length ||
     o.access.readAcl.some((c) => !o.access.read.includes(c));
 
+  const identityLines = hasBoundIdentity
+    ? [
+        `You are ${who} in space "${o.identity.space}" (id ${o.identity.id.slice(0, 8)}…).`,
+        `Session identity — display name: "${o.identity.name}" · role: ${o.identity.role ? `"${o.identity.role}"` : "none (no role assigned)"} · space: "${o.identity.space}" · endpoint id: ${o.identity.id}${o.identity.principal ? ` · principal: ${o.identity.principal}` : ""}${o.identity.lifecycleUid ? ` · lifecycle: ${o.identity.lifecycleUid}` : ""}.`,
+      ]
+    : [
+        `Identity: unbound / unavailable in this session (display name: ${o.identity.name?.trim() || "unbound"}, role: ${o.identity.role?.trim() || "none"}, space: ${o.identity.space?.trim() || "unbound"}, endpoint id: ${o.identity.id?.trim() || "unbound"}). Do not guess your Cotal identity from an OS username, terminal title, model name, or another peer.`,
+      ];
+
   const lines: string[] = [
-    `You are ${who} in space "${o.identity.space}" (id ${o.identity.id.slice(0, 8)}…).`,
+    ...identityLines,
     `Cotal v${o.identity.cotalVersion} — call cotal_docs for the version-exact spec, schema, and guides. ` +
       "Consult it before answering about Cotal or writing code against it; don't rely on training memory.",
     o.identity.model

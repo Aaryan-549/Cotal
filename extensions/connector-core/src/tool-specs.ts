@@ -706,12 +706,18 @@ export function cotalToolSpecs(
       run(agent) {
         // Reflect the SAME gated tool list the connector exposes (cotalToolSpecs already filters
         // spawn/persona by capability), so the card can't claim a tool the agent can't call.
-        const visible: OrientationTool[] = cotalToolSpecs(config, source, env, offered).map((s) => ({
+        const activeConfig = (agent as { config?: AgentConfig }).config ?? config;
+        const visible: OrientationTool[] = cotalToolSpecs(activeConfig, source, env, offered).map((s) => ({
           name: s.name,
           title: s.title,
         }));
-        const card = renderOrientation(buildOrientation(agent, config, visible, Date.now()));
+        const card = renderOrientation(buildOrientation(agent, activeConfig, visible, Date.now()));
         const issue = agent.connectionIssue;
+        if (agent.stopping) {
+          return ok(
+            `(session stopped — this session is no longer bound to the mesh${issue ? `; last error: ${issue.slice(0, 300)}` : ""})\n\n${card}`,
+          );
+        }
         return ok(
           agent.connected
             ? card
