@@ -117,11 +117,11 @@
     {
       "name": "a re-entered attempt relays again instead of finding its goal",
       "file": "implementations/runtime/src/mesh-handler.ts",
-      "find": "    const actx = await this.actionCtx();\n    if ((await readGoalStatus(actx, ref)) !== undefined) return;\n    let reply: EpAttributedReply;",
-      "replace": "    const actx = await this.actionCtx();\n    let reply: EpAttributedReply;",
+      "find": "    const actx = await this.actionCtx();\n    if ((await readGoalStatus(actx, ref)) !== undefined) return;\n    const service = await this.relayManagerBeforeSubmit(seat.host, ref, kind, `${kind}(${step})`);",
+      "replace": "    const actx = await this.actionCtx();\n    const service = await this.relayManagerBeforeSubmit(seat.host, ref, kind, `${kind}(${step})`);",
       "expectRed": "the resume re-told the seat nothing: the relay is idempotent by the attempt's own goal id",
       "cell": "the resume re-told the seat nothing: the relay is idempotent by the attempt's own goal id",
-      "note": "Measured 2026-09-03: KILLED, 35/39, five reds with the named cell among them and the suite completing to its summary line. The earlier note recorded a kill followed by a HANG: the named cell went red and the run then never finished. That hang was the suite's, not the mutant's — block 6 ended on a bare `await parked` whose pause only the re-judge's answer settles, so a broken re-judge left it waiting on a mediated hour nobody pumps. It is bounded now, and the proof grades this as a finished red rather than an unknown."
+      "note": "Measured 2026-09-03: KILLED, 35/39, five reds with the named cell among them and the suite completing to its summary line. The earlier note recorded a kill followed by a HANG: the named cell went red and the run then never finished. That hang was the suite's, not the mutant's — block 6 ended on a bare `await parked` whose pause only the re-judge's answer settles, so a broken re-judge left it waiting on a mediated hour nobody pumps. It is bounded now, and the proof grades this as a finished red rather than an unknown. Re-anchored 2026-10-19 across the placed-host service resolution, which the mutant keeps; not re-measured."
     },
     {
       "name": "an ask outside the roster is not refused up front",
