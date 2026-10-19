@@ -2696,9 +2696,8 @@ const lapseWindow = (lapsedSince: number | undefined, lastReadAt: number, now: n
   lapsedSince === undefined || now - lastReadAt > PRESENCE_GAP_MS ? now : lapsedSince;
 /** The budgets this host meters for an agent, read from the spawn's `permits` record. */
 type AgentPermits = { turns?: number; wallClockMs?: number };
-/** The seat an ask is told to: its roster identity, its address, and the schema it must meet. */
-/** `host`: the instance a placed spawn was placed on. A placed seat's turns are addressed there and
- *  nowhere else; an unplaced seat's ride the class rail. */
+/** The seat an ask is told to: its roster identity and address.
+ *  `host` pins a placed seat's turns to its placement instance; unplaced seats use the class rail. */
 type SeatAddress = { name: string; uid: string; owner: string; actor: string; host?: string };
 
 /** What an `expired` turn refusal shows. The placed host speaks for its own seat. A class-rail

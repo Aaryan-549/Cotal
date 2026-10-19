@@ -100,11 +100,11 @@
     {
       "name": "spawn never registers the roster entry turn addresses",
       "file": "implementations/runtime/src/mesh-handler.ts",
-      "find": "      this.roster.set(parseAgentHandle(handle.agent).name, {\n        handle,\n        uid: parseAgentHandle(handle.agent).uid,\n        goalId: ref.goalId,\n        ...(address !== undefined ? { owner: address.owner, actor: address.actor } : {}),\n        ...(permits !== undefined ? { permits } : {}),\n        ...(typeof ext.spawnedAt === \"number\" ? { spawnedAt: ext.spawnedAt } : {}),\n        ...(req.placement !== undefined ? { host: req.placement.instanceId } : {}),\n      });",
+      "find": "      this.roster.set(parseAgentHandle(handle.agent).name, {\n        handle,\n        uid: parseAgentHandle(handle.agent).uid,\n        goalId: ref.goalId,\n        ...(address !== undefined ? { owner: address.owner, actor: address.actor } : {}),\n        ...(permits !== undefined ? { permits } : {}),\n        ...(typeof ext.spawnedAt === \"number\" ? { spawnedAt: ext.spawnedAt } : {}),\n        ...(typeof ext.host === \"string\" ? { host: ext.host } : {}),\n      });",
       "replace": "      void address;",
       "expectRed": "the run completes through the real relay accept and the real terminal",
       "cell": "the run completes through the real relay accept and the real terminal",
-      "note": "The roster IS turn's address book: unregistered, every live-path turn refuses on the roster it should ride. Measured 2026-09-02: twenty-eight reds across every block except the adoption-seeded ones; 6 passed, 28 failed, the suite reaching its own exit."
+      "note": "The roster IS turn's address book: unregistered, every live-path turn refuses on the roster it should ride. Measured 2026-09-02: twenty-eight reds across every block except the adoption-seeded ones; 6 passed, 28 failed, the suite reaching its own exit. Re-anchored 2026-10-19 on the durable `ext.host` line the final registration reads; not re-measured."
     },
     {
       "name": "a terminal leaves the client's armed pause live",
