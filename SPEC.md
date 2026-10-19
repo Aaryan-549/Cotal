@@ -763,6 +763,11 @@ credential diverge (§2): the principal keys subjects/durables/presence; the con
 | `transfer-reader` | the stock delete marker on its own transfer bucket's meta subjects | its own `OBJ_cotal_xfer_<space>_<instanceId>` stream: info, message get, its push consumer, purge | one-shot per `transcript-receive` or sweep; no other instance's bucket |
 | scoped host profiles | least-privilege per function | least-privilege per function | The former allow-all `manager` is **deleted**; its host duties split into scoped, single-function creds (`supervisor`, `provisioner`, `delivery`, `membership-rw`, `operator`, `purger`, `teardown`, `channel-writer`, …). No allow-all credential exists. Appendix B summarizes them; the concrete grant lists are **generated from the §13.9 ownership matrix** into `provision.ts` (the matrix is the single oracle; `provision.ts` is its artifact, Appendix B its summary). |
 
+The `resolve-cwd` launch read is limited by execution mode. A manager whose runtime delegates
+seats outside its host MUST refuse it with `failed-precondition` before any filesystem lookup.
+The refusal MUST be independent of the requested path's existence, type and symlink target,
+and MUST NOT return a host name or canonical path. Such a runtime cannot use a manager-host cwd.
+
 DM and TASK confidentiality, and the CHAT read boundary, close the leak paths:
 
 1. Replies and pull responses ride a per-connection inbox prefix, `_INBOX_<connId>.>`, which

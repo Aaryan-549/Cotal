@@ -7,7 +7,7 @@ import * as auth from "../../auth/dist/index.js";
 const assert: typeof import("node:assert/strict") = (await import("node:assert/strict")).default;
 const { createServer } = await import("node:http");
 const { createRequire } = await import("node:module");
-const { mkdirSync, writeFileSync, realpathSync } = await import("node:fs");
+const { mkdirSync, writeFileSync, realpathSync, symlinkSync } = await import("node:fs");
 const { join } = await import("node:path");
 const { hostname } = await import("node:os");
 const { SignJWT, generateKeyPair, exportJWK, decodeJwt } = createRequire(new URL("../../auth/package.json", import.meta.url))("jose") as any;
@@ -42,8 +42,9 @@ const origin = `http://127.0.0.1:${(idp.address() as import("node:net").AddressI
 const jwt = (sub: string) => new SignJWT({}).setProtectedHeader({ alg: "EdDSA", kid: jwk.kid }).setIssuer(origin).setAudience(origin).setSubject(sub).setIssuedAt().setExpirationTime("10m").sign(pair.privateKey);
 const fx = await startHostedAuthFixture("launch-probe", 1); const a = fx.accounts[0]!;
 writeFileSync(join(a.stateDir, "idp.json"), JSON.stringify({ ver: 1, url: `${origin}/api/auth`, issuer: origin, audience: origin, jwksUri: `${origin}/api/auth/jwks` }), { mode: 0o600 });
-const root = join(fx.dir, "participant"), controlRoot = join(fx.dir, "control");
+const root = join(fx.dir, "participant"), controlRoot = join(fx.dir, "control"), delegatedRoot = join(fx.dir, "delegated");
 mkdirSync(join(root, ".cotal", "agents"), { recursive: true }); mkdirSync(controlRoot);
+mkdirSync(delegatedRoot);
 const controlState = remoteManagerClient.loadOrCreateRemoteManagerIdentity(controlRoot, a.space);
 const assignment = { v: 1 as const, space: a.space, accountPublicKey: a.accountPublicKey, instanceId: controlState.instanceId, lifecycleUid: controlState.lifecycleUid, assignmentRevision: 1, state: "assigned" as const };
 const ownerSecret = (await loadOwnerSecret(a.store, a.space))!;
@@ -56,24 +57,32 @@ const actors = {
 grantActor(a.stateDir, { owner, actor: "cli", lifecycleUid: mintLifecycleUid(), scope: ["supervise"], allowSubscribe: [], allowPublish: [] });
 for (const [actor, scope] of Object.entries(actors)) grantActor(a.stateDir, { owner, actor, lifecycleUid: mintLifecycleUid(), scope: [...scope], allowSubscribe: [], allowPublish: [] });
 grantActor(a.stateDir, { owner: otherOwner, actor: "launcher", lifecycleUid: mintLifecycleUid(), scope: ["spawn"], allowSubscribe: [], allowPublish: [] });
+grantActor(a.stateDir, { owner: otherOwner, actor: "cli", lifecycleUid: mintLifecycleUid(), scope: ["supervise"], allowSubscribe: [], allowPublish: [] });
 const token = await jwt("owner"), otherToken = await jwt("other");
 // A connector that reports a catalog and is never launched.
 registry.register({ kind: "connector", name: "launch-probe", requires: ["node"], listModels: () => ({ models: [{ id: "probe-model" }] }),
   buildLaunch: () => { throw new Error("launch-reads: nothing is launched"); } } as import("@cotal-ai/core").Connector);
+let runtimeSpawnCalls = 0;
+const neverSpawn = (): never => { runtimeSpawnCalls++; throw new Error("launch-reads: nothing is launched"); };
+registry.register({ kind: "runtime", name: "launch-delegated", available: () => true,
+  create: () => ({ kind: "launch-delegated", spawn: neverSpawn, spawnDelegated: neverSpawn }) } satisfies import("@cotal-ai/core").RuntimeProvider);
 let service: Awaited<ReturnType<typeof startAuthService>> | undefined;
 let delivery: Awaited<ReturnType<typeof bootDeliveryDaemon>> | undefined;
 let participant: Awaited<ReturnType<typeof nativeRemoteManager>> | undefined;
 let control: Awaited<ReturnType<typeof nativeRemoteManager>> | undefined;
+let delegated: Awaited<ReturnType<typeof nativeRemoteManager>> | undefined;
 const callers: Awaited<ReturnType<typeof connect>>[] = [];
 try {
   await setupSpaceStreams({ space: a.space, servers: fx.servers, creds: await mintCreds(a.auth, newIdentity(), "provisioner") });
   delivery = await bootDeliveryDaemon({ space: a.space, servers: fx.servers, auth: a.auth, reloadStoreIdentity: a.store.identity });
   service = await startAuthService({ context: { accountPublicKey: a.accountPublicKey, lifecycleUid: mintLifecycleUid() }, space: a.space, servers: fx.servers, stateDir: a.stateDir, store: a.store, storeIdentity: a.store.identity, publicFace: { port: 0, trustedProxy: false }, platformControl: { observeAssignment: async () => assignment } });
-  const humanCall = async (request: any) => { const response = await fetch(`${service!.publicUrl}/manager-service-authority`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idpToken: token, request }) }); const body = await response.json() as any; if (!response.ok) throw new Error(`authority refused ${request.kind}: ${body.error}`); return body; };
+  const humanCall = (idpToken: string) => async (request: any) => { const response = await fetch(`${service!.publicUrl}/manager-service-authority`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idpToken, request }) }); const body = await response.json() as any; if (!response.ok) throw new Error(`authority refused ${request.kind}: ${body.error}`); return body; };
   const controlCall = (request: any) => service!.platformControlAuthority!({ v: 1, kind: "platform-control-authority", space: a.space, accountPublicKey: a.accountPublicKey, assignmentRevision: 1, request });
   control = await nativeRemoteManager({ space: a.space, servers: fx.servers, root: controlRoot, exchangeUrl: service.publicUrl!, execution: "none", call: controlCall });
-  participant = await nativeRemoteManager({ space: a.space, servers: fx.servers, root, exchangeUrl: service.publicUrl!, execution: "runtime", call: humanCall });
+  participant = await nativeRemoteManager({ space: a.space, servers: fx.servers, root, exchangeUrl: service.publicUrl!, execution: "runtime", call: humanCall(token) });
+  delegated = await nativeRemoteManager({ space: a.space, servers: fx.servers, root: delegatedRoot, exchangeUrl: service.publicUrl!, execution: "runtime", runtime: "launch-delegated", call: humanCall(otherToken) });
   assert.equal(participant.owner, owner);
+  assert.equal(delegated.owner, otherOwner);
   const iid = participant.state.instanceId;
 
   // The mint: the shipped permission builder, for the scopes above, on one pinned instance.
@@ -102,20 +111,20 @@ try {
     const response = await fetch(`${service!.publicUrl}/exchange`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idpToken, actor, view: "manager-caller", managerInstanceId: instanceId }) });
     return { status: response.status, body: await response.json() as any };
   };
-  const open = async (actor: string) => {
-    const ex = await exchange(token, actor, iid);
+  const open = async (actor: string, instanceId = iid, idpToken = token, callerOwner = owner) => {
+    const ex = await exchange(idpToken, actor, instanceId);
     assert.equal(ex.status, 200, `exchange ${actor}: ${ex.body.error}`);
     const options = standaloneConnectOpts({ bearer: ex.body.token, sentinelCreds: a.sentinelCreds, tls: false });
     const nc = await connect({ servers: fx.servers, ...options }); callers.push(nc);
-    const issued = await issuedUserCaller(nc, a.space, String(options.name), { owner, actor, uid: (decodeJwt(ex.body.token) as any).act.lifecycleUid });
-    return { nc, issued, service: await resolveService(nc, a.space, "manager", issued, { instanceId: iid }) };
+    const issued = await issuedUserCaller(nc, a.space, String(options.name), { owner: callerOwner, actor, uid: (decodeJwt(ex.body.token) as any).act.lifecycleUid });
+    return { nc, issued, instanceId, service: await resolveService(nc, a.space, "manager", issued, { instanceId }) };
   };
-  type Outcome = { kind: "answered"; data: any } | { kind: "manager-refused"; code: string } | { kind: "broker-refused" } | { kind: "error"; message: string };
+  type Outcome = { kind: "answered"; data: any } | { kind: "manager-refused"; code: string; error: unknown } | { kind: "broker-refused" } | { kind: "error"; message: string };
   const call = async (c: Awaited<ReturnType<typeof open>>, command: string, args?: Record<string, unknown>): Promise<Outcome> => {
     try {
       const r = await invokeCommand(c.nc, a.space, c.service, command, args, { deadlineMs: 15000 });
-      assert.equal(r.responder.instanceId, iid);
-      return r.reply.ok ? { kind: "answered", data: r.reply.data } : { kind: "manager-refused", code: String(r.reply.error?.code) };
+      assert.equal(r.responder.instanceId, c.instanceId);
+      return r.reply.ok ? { kind: "answered", data: r.reply.data } : { kind: "manager-refused", code: String(r.reply.error?.code), error: r.reply.error };
     } catch (error) {
       const message = (error as Error).message;
       return /REFUSED BY THE BROKER/.test(message) ? { kind: "broker-refused" } : { kind: "error", message };
@@ -169,11 +178,32 @@ try {
   cell("launcher: the view is broker-refused on another Manager instance", elsewhere === "broker-refused", elsewhere);
   const foreign = await exchange(otherToken, "launcher", iid);
   cell("another owner's spawn-scoped actor cannot obtain a view of this Manager", foreign.status !== 200 && foreign.body.token === undefined, foreign);
+
+  // The control host's filesystem is not the resource where a delegated launcher may execute.
+  // These owned paths are outside either participant's workspace. All calls use a real exchanged
+  // spawn-only view, registered contract, broker and Manager handler, never a private method.
+  const outside = join(fx.dir, "outside-workspaces"), alias = join(fx.dir, "outside-alias"), missing = join(fx.dir, "missing-outside");
+  mkdirSync(outside); symlinkSync(outside, alias);
+  const delegatedCaller = await open("launcher", delegated.state.instanceId, otherToken, otherOwner);
+  const delegatedStatus = await call(delegatedCaller, "status");
+  cell("delegated launcher: status identifies the delegated runtime",
+    delegatedStatus.kind === "answered" && delegatedStatus.data.runtime === "launch-delegated" && delegatedStatus.data.execution === "runtime", delegatedStatus);
+  const refusals: Outcome[] = [];
+  for (const [label, cwd] of [["existing", outside], ["missing", missing], ["symlink", alias]]) {
+    const result = await call(delegatedCaller, "resolve-cwd", { cwd });
+    refusals.push(result);
+    cell(`delegated launcher: ${label} host path is refused by execution mode`,
+      result.kind === "manager-refused" && result.code === "failed-precondition" && /starts seats outside this host/.test(JSON.stringify(result.error)), result);
+  }
+  cell("delegated launcher: existing, missing and symlink host paths have identical refusals",
+    refusals.every((r) => r.kind === "manager-refused") && new Set(refusals.map((r) => JSON.stringify(r))).size === 1, refusals);
+  cell("delegated launcher: neither runtime spawn entry was called", runtimeSpawnCalls === 0, runtimeSpawnCalls);
 } catch (error) {
   failed++; console.log(`FAIL fixture: ${(error as Error).message}`);
 } finally {
   for (const nc of callers) await nc.close().catch(() => {});
   await participant?.manager.stop({ withAgents: true }); await control?.manager.stop();
+  await delegated?.manager.stop({ withAgents: true });
   try { await service?.close(); } finally { await delivery?.stop(); await fx.close(); await new Promise<void>((r) => idp.close(() => r())); }
 }
 console.log(`launch reads: ${passed} passed, ${failed} failed`);

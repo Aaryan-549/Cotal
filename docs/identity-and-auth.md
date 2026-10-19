@@ -272,7 +272,9 @@ ledger scope `admin`: `channel-writer` (`cotal channels set/default`) and `chann
 dashboard's per-click channel delete). It also mints the narrowing `manager-caller` view for humans
 or managed agents. That view binds the bearer to one live registered manager instance. It adds no
 capability, except that a `spawn` holder's view may read that manager's `status`, `models` and
-`resolve-cwd`, which a launch there needs. God-view (`admin`), space-history `purger`, `deployer`, and `manager-service` stay
+`resolve-cwd`, which a host-local launch there needs. A manager using a delegated runtime refuses
+host cwd resolution before filesystem lookup because its seats execute outside that host.
+God-view (`admin`), space-history `purger`, `deployer`, and `manager-service` stay
 loopback-only. A managed-agent secret exchange refuses every other view. This is not full remote channel management: `cotal web` still
 mints the read-only admin view at startup, so a remote dashboard that needs that god-view still
 fails even when a later delete would mint `channel-purger`.

@@ -5430,9 +5430,11 @@ export class Manager {
     return { cwd, host: hostname() };
   }
 
-  /** Resolve a placed spawn directory on this manager's host. The manager serves any existing
-   * absolute directory it can resolve. It creates nothing and never substitutes the workspace root. */
+  /** Resolve a placed spawn directory on this manager's host. Delegated execution refuses before
+   * filesystem lookup, since its seats cannot use host cwd. Creates nothing and never substitutes the workspace root. */
   private resolveSpawnCwd(value: unknown): { cwd: string; host: string } {
+    if (this.execution === "runtime" && this.requiredRuntime.spawnDelegated)
+      throw new EpEnvelopeError("failed-precondition", `runtime "${this.requiredRuntime.kind}" starts seats outside this host, so it cannot resolve a directory on this host's filesystem (cwd); the seat runs in its runtime resource's own directory`);
     const asked = typeof value === "string" ? value : String(value ?? "");
     const refuse = (reason: string): never => {
       throw new EpEnvelopeError("failed-precondition", `cwd does not resolve on this host: ${JSON.stringify(asked)} (${reason})`);
