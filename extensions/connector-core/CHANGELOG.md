@@ -1,5 +1,18 @@
 # @cotal-ai/connector-core
 
+## 0.87.0
+
+### Minor Changes
+
+- af82e8d: A seat's launch-material directory (`cotal-launch-*` in the OS temp dir, holding the broker URL, the creds path and the control token) is now removed when the seat's process exits. Before this change a Claude seat left it behind after `cotal stop`, while the persona file and control socket of the same launch were removed. `materialEnv` in `@cotal-ai/connector-core` now takes the launch's artifact array as a second, required argument and appends the material's private directory to it, and every connector returns that array on `LaunchSpec.artifacts`, so the manager, the pty runtime and the foreground `cotal spawn` remove it the way they remove a persona file. Each connector now writes the material after its last refusal, so a refused launch leaves no material file behind. The second material file the Hermes launcher writes for its gateway child is not covered by this change.
+- 970bf2d: Accept the additive private tool-result contract in SPEC and the version-exact documentation bundle. Define consent, capture frontiers, fixed audiences, bounded revocation and exact-instance reads without implementing or enabling the path. Public tool arguments and results remain withheld; activation requires qualified owner implementations and a stock release.
+
+### Patch Changes
+
+- 5d686ff: Declare frozen private tool-result consent, revocation, serving-material and handle-mode command contracts, with closed parsers and a managed-agent issue/renew envelope. Add the consents anchor role and its tool-results scope check. These exports do not sign, issue, register, serve or enable the private path; public tool arguments and results remain withheld.
+- 9755079: Clarify private tool-result audience wording, distinguish the expired answer state from refusal codes, and spell out the consent replay row's existing signing and validity claims. No contract rule, runtime behavior or activation gate changes.
+- 8d513aa: Add a consent-only verifier for pinned signed password authentication within five minutes and a host-only proof decision door. Retain validated authentication provenance without changing ordinary bearer exchange. Private tool-result consent, issuance and serving remain unavailable.
+
 ## 0.86.0
 
 ### Minor Changes

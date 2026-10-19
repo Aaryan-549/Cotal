@@ -1,5 +1,40 @@
 # @cotal-ai/manager
 
+## 0.87.0
+
+### Minor Changes
+
+- 0f92fa4: A person who may spawn on their own Manager can now read what a launch there needs. A `manager-caller` view whose actor holds `spawn` carries the Manager's `status`, `models` and `resolve-cwd` commands on its one pinned instance. Before, those reads needed `admin`, and no view carried `resolve-cwd`, so a launch dialog that reads the Manager's connectors, model catalogs and a working directory was refused at the broker. A `run`-only or no-scope view gains nothing, `ps` and `slots` stay with `admin`, and the standing `spawn` set that reaches every Manager on the class rail is unchanged.
+
+  A Manager whose runtime delegates seats outside its host refuses `resolve-cwd` before filesystem lookup. Every path gets the same execution-mode refusal, since delegated seats cannot use a Manager-host working directory.
+
+  A user mesh's co-located Manager answers every owner's view, so its `status` now counts only the caller's own seats, as `ps` would list them, unless the caller holds `admin`. A remote Manager's seats all belong to its owner, and its count is unchanged. The auth service mints the view, so the new reads arrive with its upgrade. On a self-hosted user mesh, restart the Manager on this release with or before the auth service, so the count is bounded and delegated host cwd resolution is refused before the reads are minted.
+
+### Patch Changes
+
+- 70aa27b: A repair `cotal up` after a crash now restores the manager and the delivery daemon in one run. A
+  manager or delivery daemon that is killed, or a daemon that exits because its broker went away,
+  cannot release its lease, and a replacement started inside the lease TTL used to lose the create and
+  make `up` exit 1. The new manager now waits out a lease row that names its workspace root and a pid
+  that is not running on the host, and `up` waits out a delivery lease held by the credential the
+  folder gave its previous daemon while no daemon is recorded running. The wait never writes the
+  lease: a row that is written again during it has a live holder and is refused, and a row held by
+  anyone else is refused at once as before.
+- aae54dd: A seat spawned with `supervise` now survives its manager's death. When a manager ends without stopping the seat (a crash, or a pty seat that ended with it), the next manager of the same instance restarts the seat under the same name, lifecycle uid, credential, persona and cwd and counts it as one restart of the policy, so a workflow run resumed by that manager finishes its interrupted `turn` instead of failing it with L4002. The manager keeps what that restart needs in `.cotal/seat-records/<space>/<name>.json` while the seat runs. A seat whose budget is spent, or whose persona file or credential changed or expired, is retired as before. A seat resumed from a preserved inventory now also keeps the nkey seed its credential renewal needs: the manager read it with a pattern that matched no real creds file.
+- 8fc9dca: A tmux seat that outlives its manager is now adopted by the next manager instead of closed. The manager records each adoptable seat, and on startup the successor checks the recorded tmux server, window and pane, then manages the seat again under its existing credential so a run's pending turn continues on it. A seat whose pane has exited is retired as before.
+- Updated dependencies [e84b6c6]
+- Updated dependencies [c06cf5b]
+- Updated dependencies [af82e8d]
+- Updated dependencies [0f92fa4]
+- Updated dependencies [5d686ff]
+- Updated dependencies [970bf2d]
+- Updated dependencies [9755079]
+- Updated dependencies [70aa27b]
+- Updated dependencies [e6bb48f]
+  - @cotal-ai/core@0.87.0
+  - @cotal-ai/workspace@0.87.0
+  - @cotal-ai/seat@0.87.0
+
 ## 0.86.0
 
 ### Patch Changes
