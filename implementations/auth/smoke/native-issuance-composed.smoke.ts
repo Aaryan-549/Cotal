@@ -47,8 +47,8 @@ import {
   type IssuedCaller, type RemoteManagerAuthorityMaterial, type RemoteRunAdmissionResult,
 } from "@cotal-ai/core";
 import { emitSentinel } from "@cotal-ai/smoke-kit";
-import { epAuthBucket, mintMembershipObserverCreds } from "@cotal-ai/core";
-import { deliveryCredsKey, membershipObserverCredsKey, membershipRwCredsKey, type HostedServiceHandle } from "@cotal-ai/workspace";
+import { epAuthBucket, mintConnectionEvictorCreds, mintMembershipObserverCreds } from "@cotal-ai/core";
+import { connectionEvictorCredsKey, deliveryCredsKey, membershipObserverCredsKey, membershipRwCredsKey, type HostedServiceHandle } from "@cotal-ai/workspace";
 import { startDeliveryService } from "../../delivery/src/index.js";
 import { openAuthorityClient } from "../src/authority-client.js";
 import { readNativeIssuance } from "../src/native-issuance.js";
@@ -180,6 +180,7 @@ try {
   await a.store.put(deliveryCredsKey(a.space, composition), await mintCreds(a.auth, newIdentity(), "delivery"));
   await a.store.put(membershipRwCredsKey(a.space, composition), await mintCreds(a.auth, newIdentity(), "membership-rw"));
   await a.store.put(membershipObserverCredsKey(a.space, composition), await mintMembershipObserverCreds(a.auth, newIdentity()));
+  await a.store.put(connectionEvictorCredsKey(a.space, composition), await mintConnectionEvictorCreds(a.auth, newIdentity()));
   service = await startAuthService({
     context: { accountPublicKey: a.accountPublicKey, lifecycleUid: mintLifecycleUid() },
     space: a.space,
