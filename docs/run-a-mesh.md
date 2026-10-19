@@ -286,6 +286,11 @@ matches the ownership you want, and treat
 A broker that crashes under that foreground `up` keeps its mesh record and exits non-zero, so the
 unit's restart takes the repair path against the recorded store rather than starting a second one.
 
+A manager or delivery daemon that crashes keeps its lease until the bucket TTL removes it (10s for
+the manager, 30s for delivery). A repair `up` inside that window waits out the lease when it can show
+the holder is gone, so one run restores both processes. A lease that is renewed during the wait has
+a live holder, and the repair refuses it. See [`up`](cli.md#up).
+
 If the deployment deliberately uses `cotal up --detach` as a boot action, monitor observed state
 instead of the launcher's exit:
 

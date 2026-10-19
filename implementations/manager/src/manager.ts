@@ -13,6 +13,9 @@ import {
   DEFAULT_SERVER,
   DEV_OWNER,
   MANAGER_LEASE_RENEW_MS,
+  MANAGER_LEASE_TTL_MS,
+  awaitLeaseExpiry,
+  leaseRemainingMs,
   STANDING_RENEWABLE_TTL_SEC,
   assertLifecycleToken,
   discardLaunchArtifacts,
@@ -76,7 +79,7 @@ import {
   invokeCommand,
   digestIdToken,
 } from "@cotal-ai/core";
-import { agentAuthState, agentCredsDir, agentLifecycleSecretFilePaths, agentSecretFilePaths, agentSecretKeyForFile, authDir, claimIdentityRecord, claimManagerSiblingIdentities, connectorInstallHint, DELIVERY_CREDS_KIND, extensionConnectors, findCotalRoot, getSpaceAuth, hasUserAuthState, loadExtensionsManifest, loadManagerInstanceIdentity, loadMeshes, localTrustOfSpace, manifestExtensionNames, materializeFromManifest, materializeSecretToFile, MEMBERSHIP_RW_CREDS_KIND, mergeLaunchOptions, remintDaemonCreds, resolveAgentType, resolveOnPath, createManagerInstanceIdentity, spaceKey, spaceMaterialKey, SYSTEM_CREDS_FILES, userAuthStateDir, workspaceSecretStore, writeRenewalRecord, type MeshEntry, type RenewalRecord, type UserAuthInfo } from "@cotal-ai/workspace";
+import { agentAuthState, agentCredsDir, agentLifecycleSecretFilePaths, agentSecretFilePaths, agentSecretKeyForFile, authDir, claimIdentityRecord, claimManagerSiblingIdentities, connectorInstallHint, DELIVERY_CREDS_KIND, extensionConnectors, findCotalRoot, getSpaceAuth, hasUserAuthState, loadExtensionsManifest, loadManagerInstanceIdentity, loadMeshes, localTrustOfSpace, manifestExtensionNames, materializeFromManifest, materializeSecretToFile, MEMBERSHIP_RW_CREDS_KIND, mergeLaunchOptions, probeLiveness, remintDaemonCreds, resolveAgentType, resolveOnPath, createManagerInstanceIdentity, spaceKey, spaceMaterialKey, SYSTEM_CREDS_FILES, userAuthStateDir, workspaceSecretStore, writeRenewalRecord, type MeshEntry, type RenewalRecord, type UserAuthInfo } from "@cotal-ai/workspace";
 import type { ActionContext, AgentDef, AttachSession, Connector, ConnectorModelCatalog, ControlReply, CredHealth, DaemonStoreAnswer, DeliveryLeaseInfo, EpCaller, LaunchOpts, LaunchSpec, ManagedLifecycleHandoff, ManagerLeaseInfo, MeshLaunchAgent, Presence, RuntimeReference, SecretStore, SecretStoreIdentity, SpaceAuth } from "@cotal-ai/core";
 import {
   createRuntime,
@@ -1894,23 +1897,17 @@ export class Manager {
     // THIS logical instance's own key (atomic CAS create). A DIFFERENT instance (a second manager in a
     // second workspace root) has a distinct id ⇒ a distinct key ⇒ it coexists; the create THROWS only
     // when the SAME instance id is already live (a same-root double-start, or a restart racing the
-    // crashed predecessor's not-yet-expired key), and we REFUSE loud. A crashed holder's key auto-expires
-    // (bucket TTL). Losing the key LATER ends this process only when another process holds it; otherwise
+    // crashed predecessor's not-yet-expired key). A double-start REFUSES loud; a restart whose
+    // predecessor is provably dead on this host waits for that key's bucket TTL to remove it (#4092,
+    // {@link acquireInstanceLease}). Losing the key LATER ends this process only when another process holds it; otherwise
     // the renew loop puts it back or keeps retrying ({@link renewLease}).
     this.leaseInfo = { holder: this.ep.ref().id, instanceId: this.managerInstanceId, runtime: this.runtimeKind, root: resolve(this.workspaceRoot), pid: process.pid };
     try {
-      this.leaseRevision = await this.ep.acquireManagerLease(this.leaseInfo);
+      this.leaseRevision = await this.acquireInstanceLease(this.leaseInfo);
     } catch (e) {
-      // Our OWN instance id already holds a live key ⇒ refuse. Anything else (e.g. a KV/JS error) is a
-      // real failure to surface, not a silent "held" — keep the cause so it isn't misread as a conflict.
-      const held = (await this.ep.readOwnManagerLease(this.managerInstanceId).catch(() => undefined))?.info;
       await this.ep.stop();
       await this.attach.stop();
-      throw new Error(
-        held
-          ? `manager instance ${this.managerInstanceId} already serves space "${this.space}" from ${held.root === this.leaseInfo.root ? "this" : "another"} workspace root (${held.runtime}, pid ${held.pid}, root ${held.root}) - stop it first before restarting the same instance`
-          : `could not acquire the manager lease for space "${this.space}": ${rejectionText(e)}`,
-      );
+      throw e;
     }
     this.leaseTimer = setInterval(() => { void this.renewLease(); }, MANAGER_LEASE_RENEW_MS);
     this.leaseTimer.unref?.();
@@ -3050,6 +3047,56 @@ export class Manager {
     }));
     if (failures.length)
       throw new Error(`manager preservation shutdown incomplete: ${failures.join("; ")}`);
+  }
+
+  /** Create THIS instance's lease key, waiting out a dead predecessor's row first (#4092).
+   *
+   *  A manager SIGKILLed on this host cannot release its key, so a restart inside the key's TTL
+   *  loses the create. When the row names this workspace root and a pid that is not running here
+   *  (or is this process's own pid, which a live predecessor cannot hold), the holder is dead and
+   *  the restart waits for the bucket TTL to remove the row, then creates again. It never writes
+   *  over the row: a live holder renews it inside the TTL, and the wait then refuses on that write.
+   *  Any other conflict refuses at once, as before. */
+  private async acquireInstanceLease(info: Omit<ManagerLeaseInfo, "since">): Promise<number> {
+    const refuse = (held: ManagerLeaseInfo | undefined, e: unknown): Error =>
+      new Error(
+        held
+          ? `manager instance ${this.managerInstanceId} already serves space "${this.space}" from ${held.root === info.root ? "this" : "another"} workspace root (${held.runtime}, pid ${held.pid}, root ${held.root}) - stop it first before restarting the same instance`
+          : `could not acquire the manager lease for space "${this.space}": ${rejectionText(e)}`,
+      );
+    try {
+      return await this.ep.acquireManagerLease(info);
+    } catch (e) {
+      // Our OWN instance id already holds a live key ⇒ refuse. Anything else (e.g. a KV/JS error) is a
+      // real failure to surface, not a silent "held" — keep the cause so it isn't misread as a conflict.
+      const held = await this.ep.readOwnManagerLease(this.managerInstanceId).catch(() => undefined);
+      if (!held || held.info.root !== info.root || (held.info.pid !== process.pid && probeLiveness(held.info.pid) !== "dead"))
+        throw refuse(held?.info, e);
+      console.error(
+        `• manager instance ${this.managerInstanceId}: its lease is still held by pid ${held.info.pid}, which is not running on this host; ` +
+          `waiting ${Math.ceil(leaseRemainingMs(held.created, MANAGER_LEASE_TTL_MS) / 1000)}s for the lease to expire`,
+      );
+      const waited = await awaitLeaseExpiry({
+        read: async () => {
+          const row = await this.ep.readOwnManagerLease(this.managerInstanceId);
+          return row && { revision: row.revision, created: row.created };
+        },
+        revision: held.revision,
+        created: held.created,
+        ttlMs: MANAGER_LEASE_TTL_MS,
+        aborted: () => this.leaseStopping,
+      });
+      if (waited === "rewritten")
+        throw new Error(
+          `manager instance ${this.managerInstanceId}: its lease was written again while waiting for pid ${held.info.pid}'s lease to expire, so a live process holds it - stop it first before restarting the same instance`,
+        );
+      if (waited !== "expired") throw refuse(held.info, e);
+      try {
+        return await this.ep.acquireManagerLease(info);
+      } catch (again) {
+        throw refuse((await this.ep.readOwnManagerLease(this.managerInstanceId).catch(() => undefined))?.info, again);
+      }
+    }
   }
 
   /** Every call joins the first stop and settles with it. A call that asks for a different

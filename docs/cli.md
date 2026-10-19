@@ -280,13 +280,24 @@ canary and waits for the bucket to expire it before reporting success. If the br
 stream update but the backing store does not persist or enforce it, `up` exits nonzero with a TTL
 persistence error instead of trusting the value returned by stream info. A refresh that restores a
 missing manager waits for that process to come up, then says so with its pid (`✓ restored in the
-background: manager (pid N)`). A manager that `up` starts and that exits at boot instead, for example
-while a crashed predecessor's lease has not expired, is reported as `! control plane degraded:` with
-the path of its log, and `up` then exits nonzero, whether it was a refresh, a first `--detach` boot
-or `up -f`. The same happens when another
+background: manager (pid N)`). A manager that `up` starts and that exits at boot instead is reported
+as `! control plane degraded:` with the path of its log, and `up` then exits nonzero, whether it was a
+refresh, a first `--detach` boot or `up -f`. The same happens when another
 `cotal supervise` takes over the manager pidfile before the started process comes up. A refresh that
 finds everything already running prints only the `✓ mesh "<space>" already running` line. A first
 boot starts its manager without the restore line.
+
+A manager or delivery daemon that is killed, or a daemon that exits because its broker went away,
+cannot release its lease. The row stays until the bucket TTL removes it: 10s for the manager and
+30s for delivery. A repair `up` inside that window waits out the row when it can show the holder is
+gone, then starts the replacement, so one run restores the control plane. For the manager, the row
+must name this workspace root and a pid that is not running on this host; the new manager logs
+`which is not running on this host; waiting` and the seconds left. For delivery, no daemon may be
+recorded running in this folder and the row must be held by the credential this folder gave its
+previous daemon; `up` prints `shard 0 is still leased to this folder's previous delivery daemon`.
+The wait never writes the lease. A row that is written again while `up` waits has a live holder, so
+the start is refused and `up` exits nonzero. A row held by any other process is refused at once,
+as before.
 
 
 `--user-auth --idp <url>` starts the space's auth service alongside the broker: the NATS
