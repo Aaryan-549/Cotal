@@ -31,7 +31,7 @@
     },
     {
       "name": "PREDICTED KILLED (2 red) - the probe reads its own TIMEOUT as death, which is the absence-of-evidence defect the whole design refuses",
-      "file": "packages/core/src/endpoint-verbs.ts",
+      "file": "packages/core/src/endpoint-call.ts",
       "find": "      timer = setTimeout(() => resolve(\"unknown\"), deadlineMs);",
       "replace": "      timer = setTimeout(() => resolve(\"gone\"), deadlineMs);",
       "expectRed": "an instance that HOLDS a subscription but never answers is UNKNOWN, never gone"
