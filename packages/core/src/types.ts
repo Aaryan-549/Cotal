@@ -106,12 +106,13 @@ export type PresenceRuntimeSource = "endpoint-process";
 /** The running process behind a presence record, as that process observed itself. Advisory display
  *  data, never authority. It carries no pid, host, path, command line or environment. */
 export interface PresenceRuntime {
-  /** Opaque CSPRNG id minted once per process. A new process publishes a new id, and one id never
-   *  spans two `lifecycleUid`s. */
+  /** Opaque CSPRNG id minted once per OS process and lifecycleUid scope, never reused. A new
+   *  process or lifecycle scope gets a new id; reconnect within that scope keeps it. */
   id: string;
   /** Epoch ms when the process started, read in-process from its own clock origin
    *  (`performance.timeOrigin`). Never a launch request, registration, heartbeat, status or activity
-   *  time. */
+   *  time. Every lifecycle in this process shares this start, including one registered later.
+   *  It does not date a separate parent, model harness or lifecycle. */
   startedAt: number;
   source: PresenceRuntimeSource;
 }

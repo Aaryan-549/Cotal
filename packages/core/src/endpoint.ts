@@ -6495,7 +6495,7 @@ export class CotalEndpoint extends EventEmitter {
       // SPEC §6: presence carries the incarnation's lifecycle UID (MUST in auth mode from v0.4);
       // omitted only where the endpoint has none (a pure operator/daemon connection never registers).
       ...(this.ownLifecycleUid !== undefined ? { lifecycleUid: this.ownLifecycleUid } : {}),
-      runtime: processRuntime(),
+      runtime: processRuntime(this.ownLifecycleUid),
       status: this.status,
       condition: this.condition,
       environment: this.environment,
@@ -6896,6 +6896,7 @@ export class CotalEndpoint extends EventEmitter {
       prev.status !== "offline" &&
       p.status !== "offline" &&
       prev.lifecycleUid === p.lifecycleUid &&
+      sameRuntime(prev.runtime, p.runtime) &&
       prev.status === p.status &&
       prev.activity === p.activity &&
       sameCondition(prev.condition, p.condition) &&
@@ -7293,6 +7294,10 @@ function sameChannelModes(
   const bk = b ? Object.keys(b) : [];
   if (ak.length !== bk.length) return false;
   return ak.every((k) => a![k] === b?.[k]);
+}
+
+function sameRuntime(a: Presence["runtime"], b: Presence["runtime"]): boolean {
+  return a?.id === b?.id && a?.startedAt === b?.startedAt && a?.source === b?.source;
 }
 
 function sameCondition(a: PresenceCondition | undefined, b: PresenceCondition | undefined): boolean {

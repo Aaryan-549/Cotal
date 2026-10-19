@@ -2,4 +2,4 @@
 "@cotal-ai/core": minor
 ---
 
-Presence now carries `runtime: { id, startedAt, source: "endpoint-process" }`: the publishing process's own start, read once in-process from `performance.timeOrigin`, with an opaque per-process id. Status, activity, heartbeats and in-process reconnects leave it unchanged and a new process publishes a new one, so an observer can show how long an agent's process has been running without guessing from activity, heartbeat or launch times. Older publishers omit it, which reads as unknown.
+Presence can carry `runtime: { id, startedAt, source: "endpoint-process" }`: the OS process holding the mesh connection reports its own start from `performance.timeOrigin`. Each process and lifecycle scope has its own opaque id, stable across status, activity, heartbeats and in-process reconnects. Endpoints in the same process share its start even when their lifecycles register later. The value does not date a separate parent, model harness or lifecycle. Runtime-only changes notify presence observers. Older publishers omit the field, which means unknown.
