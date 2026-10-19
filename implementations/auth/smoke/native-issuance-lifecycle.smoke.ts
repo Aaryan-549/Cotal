@@ -10,7 +10,7 @@
  *    test-operator account claim; exactly that socket closes while a sibling keeps working (this
  *    proves the mapping only: a fresh connect on the same bearer still gets a new key);
  *  - the plane's own writer prunes a row only after its exp plus the clock tolerance, at boot and
- *    on its timer; a corrupt row fences the plane visibly and refuses the next open; after close no
+ *    on its timer, leaving a purge marker that carries the bucket's marker TTL; a corrupt row fences the plane visibly and refuses the next open; after close no
  *    pass runs.
  *
  * Instrumentation: a full-grant test-account connection reads/seeds the auth bucket, and a test
@@ -28,7 +28,7 @@ import { jetstreamManager } from "@nats-io/jetstream";
 import { Kvm, type KV } from "@nats-io/kv";
 import { decode, encodeAccount, encodeUser, fmtCreds } from "@nats-io/jwt";
 import { createUser, fromPublic, fromSeed } from "@nats-io/nkeys";
-import { createEndpointStreams, createSpaceAuth, epAuthBucket, isReachable, serverConfig, standaloneConnectOpts, mintLifecycleUid } from "@cotal-ai/core";
+import { EP_AUTH_MARKER_TTL_MS, createEndpointStreams, createSpaceAuth, epAuthBucket, isReachable, serverConfig, standaloneConnectOpts, mintLifecycleUid } from "@cotal-ai/core";
 import {
   calloutPermissions, createCalloutAuth, createUserTokenIssuer, deriveOwnerToken, generateSigningKey,
   grantManagedActor, ledgerAclResolver, newActorToken, openAuthAuthorityPlane, startAuthCallout,
@@ -94,7 +94,7 @@ try {
 
   // ---- M0: memory-only auth store refuses the bind (createEndpointStreams made the file one) ----
   await jsm.streams.delete(`KV_${epAuthBucket(space)}`);
-  await new Kvm(setup.nc).create(epAuthBucket(space), { storage: "memory" } as never);
+  await new Kvm(setup.nc).create(epAuthBucket(space), { allow_direct: false, markerTTL: EP_AUTH_MARKER_TTL_MS, storage: "memory" } as never);
   const m0Storage = (await jsm.streams.info(`KV_${epAuthBucket(space)}`)).config.storage;
   check("M0 instrument: the seeded auth bucket really is memory storage", m0Storage === "memory", m0Storage);
   let m0 = "";
@@ -177,6 +177,8 @@ try {
     while (nowSec() <= prRow.exp + 6) await wait(200);
     await wait(PRUNE_MS * 3);
     check("PR after exp + tolerance the plane's own timer removed it", (await readNativeIssuance(kv, prKeys[0]!)) === undefined);
+    const marker = await jsm.streams.getMessage(`KV_${epAuthBucket(space)}`, { last_by_subj: `$KV.${epAuthBucket(space)}.natkey.${prKeys[0]}` });
+    check("PR the removal is a purge marker carrying the bucket's marker TTL", marker?.header?.get("KV-Operation") === "PURGE" && marker.header.get("Nats-TTL") === `${EP_AUTH_MARKER_TTL_MS / 1000}s`, marker?.header?.get("Nats-TTL"));
     const left = await natkeys(kv);
     check("PR every unexpired row is untouched", others.every((k) => left.includes(k)), { others: others.length, left: left.length });
   }

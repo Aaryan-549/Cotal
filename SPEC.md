@@ -1348,7 +1348,8 @@ that a client received the JWT or that the broker accepted the connection: a wri
 before a refusal stays. `natkey.` is not a ledger family and authorizes nothing. The issuing
 service removes a row only after its `exp` plus the clock tolerance, at boot and then on its own
 timer, walking the family with the leader-served `STREAM.MSG.GET` `next_by_subj` read (never a
-consumer) and purging each row pinned to the sequence it read; the stock purge marker stays. A row
+consumer) and purging each row pinned to the sequence it read, with the bucket's marker TTL on the
+purge marker so it expires too. A row
 that does not parse fails the boot open or fences the running service. Connections admitted
 before this row existed, responders that do not write it, and static (non-callout) JWTs have no
 row. This evidence names keys; it does not by itself stop a still-authorized bearer from

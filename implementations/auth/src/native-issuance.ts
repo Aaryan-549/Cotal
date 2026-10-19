@@ -11,7 +11,7 @@
 import type { KV } from "@nats-io/kv";
 import type { MsgRequest } from "@nats-io/jetstream";
 import { fromPublic } from "@nats-io/nkeys";
-import { epAuthBucket, nativeIssuanceKey } from "@cotal-ai/core";
+import { EP_AUTH_MARKER_TTL_MS, epAuthBucket, nativeIssuanceKey } from "@cotal-ai/core";
 import { CLOCK_TOLERANCE_SEC, type ValidatedUserToken } from "./token.js";
 import { registryStores, type LifecycleRegistry } from "./lifecycle-registry.js";
 
@@ -107,8 +107,8 @@ export async function readNativeIssuance(kv: KV, userNkey: string): Promise<Nati
  * row carries its grant's expiry, so it lives as long as that grant). The walk is the leader-served
  * `STREAM.MSG.GET` `next_by_subj` read over `natkey.` (no consumer: none may be created on the auth
  * bucket), and each removal is a KV purge pinned to the exact sequence read. A row that does not
- * parse throws: corrupt evidence is the caller's fault to surface, never a skipped row. A purge
- * leaves the stock subject-only purge marker.
+ * parse throws: corrupt evidence is the caller's fault to surface, never a skipped row. The purge
+ * marker carries the bucket's own marker TTL, so it expires too.
  */
 export async function pruneNativeIssuance(registry: LifecycleRegistry, nowSec: number): Promise<{ live: number; pruned: number }> {
   const { authKv, jsm, space } = registryStores(registry);
@@ -125,7 +125,7 @@ export async function pruneNativeIssuance(registry: LifecycleRegistry, nowSec: n
     if (assertUserNkey(key.slice("natkey.".length)) !== key) throw new Error(`natkey: stored subject ${JSON.stringify(m.subject)} is not a natkey row`);
     const record = parseNativeIssuanceRecord(m.json());
     if (record.exp + CLOCK_TOLERANCE_SEC < nowSec) {
-      await authKv.purge(key, { previousSeq: m.seq });
+      await authKv.purge(key, { previousSeq: m.seq, ttl: `${EP_AUTH_MARKER_TTL_MS / 1000}s` });
       pruned++;
     } else live++;
   }
