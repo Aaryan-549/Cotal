@@ -525,6 +525,21 @@ export function epServeSubscribeRows(space: string, endpoint: string, instanceId
   ]);
 }
 
+/** The manager request subjects whose served form a participant manager forwards for a run
+ *  admission, a resume or an answer (SPEC 14.8), on both routes a caller addresses a manager by.
+ *  The issuing host reads them and never replies: the broker let only the caller's ceiling publish
+ *  each one, so observing it is the host's own evidence that the caller asked. */
+export function servedRunRequestSubjects(space: string): string[] {
+  const p = spacePrefix(space);
+  const m = endpointToken(BASELINE_LIFECYCLE_ENDPOINT);
+  return [
+    ...[...RUN_WRITE_SNAP, RUN_ANSWER_COMMAND].flatMap((c) => [`${p}.ep.${EP_RAIL_V1}.inst.${m}.*.${c}.>`, `${p}.ep.${EP_RAIL_V1}.one.${m}.${c}.>`]),
+    // A managed seat answers on the legacy rail, the relay path; nothing else served there is forwarded.
+    `${p}.ep.inst.${m}.*.${RUN_ANSWER_COMMAND}.>`,
+    `${p}.ep.one.${m}.${RUN_ANSWER_COMMAND}.>`,
+  ];
+}
+
 /** A serving instance's egress rows (§13.9 matrix): reply publish (attribution-pinned instance
  *  triple + epoch), events, timer SCHEDULE requests (never `.armed`/`.fire`), and the epoch-pinned
  *  record-write ingress. Every row pins the instance's own identity and epoch. */

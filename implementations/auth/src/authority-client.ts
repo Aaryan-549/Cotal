@@ -27,7 +27,7 @@
 import { connect, jwtAuthenticator, type NatsConnection } from "@nats-io/transport-node";
 import { encodeUser } from "@nats-io/jwt";
 import { fromPublic, fromSeed } from "@nats-io/nkeys";
-import { EpEnvelopeError, admissionBucket, sessionsBucket, assertInboxConnId, endpointToken, epAuthBucket, epcStreamName, epfStreamName, newIdentity, recordsBucket, retirementFrontierStreams, spacePrefix, assertPoolToken, principalTags, principalKey, remoteManagerActors, remoteManagerRegistrationProof, assertLifecycleToken, epcredFamilyPrefix, epgateKey, eprepairKey, GOVERN_HEAD, RECORD_KINDS, recordAtomicKey, recordSpecKey, recordStatusKey, BASELINE_LIFECYCLE_ENDPOINT, epCallerGrantRows, instanceOnlyManagerCapabilities, type EpCaller, type PlaneConnTuple } from "@cotal-ai/core";
+import { EpEnvelopeError, admissionBucket, sessionsBucket, assertInboxConnId, endpointToken, epAuthBucket, epcStreamName, epfStreamName, newIdentity, recordsBucket, retirementFrontierStreams, spacePrefix, assertPoolToken, principalTags, principalKey, remoteManagerActors, remoteManagerRegistrationProof, assertLifecycleToken, epcredFamilyPrefix, epgateKey, eprepairKey, GOVERN_HEAD, RECORD_KINDS, recordAtomicKey, recordSpecKey, recordStatusKey, BASELINE_LIFECYCLE_ENDPOINT, epCallerGrantRows, instanceOnlyManagerCapabilities, servedRunRequestSubjects, type EpCaller, type PlaneConnTuple } from "@cotal-ai/core";
 import { authConnectReaderGrants, openConnectReader, type ConnectReader } from "./connect-reader.js";
 import { environmentManagerAdmissionIndexBucket } from "./environment-manager-admission-index.js";
 
@@ -157,22 +157,7 @@ export function platformReadinessGrants(space: string, connId: string, caller: E
   };
 }
 
-/** The manager request subjects whose served form a participant manager forwards for a run
- *  admission, a resume or an answer (SPEC 14.8), on both routes a caller addresses a manager by.
- *  The issuing host reads them and never replies: the broker let only the caller's ceiling publish
- *  each one, so observing it is the host's own evidence that the caller asked. */
-export function servedRunRequestSubjects(space: string): string[] {
-  const p = spacePrefix(space);
-  const m = endpointToken("manager");
-  return [
-    ...["run-start", "run-resume", "run-answer"].flatMap((c) => [`${p}.ep.v1.inst.${m}.*.${c}.>`, `${p}.ep.v1.one.${m}.${c}.>`]),
-    // A managed seat answers on the legacy rail, the relay path; nothing else served there is forwarded.
-    `${p}.ep.inst.${m}.*.run-answer.>`,
-    `${p}.ep.one.${m}.run-answer.>`,
-  ];
-}
-
-export { remoteManagerRegistrationProof };
+export { remoteManagerRegistrationProof, servedRunRequestSubjects };
 
 /**
  * The registration executor grant for one instance of an endpoint the AUTH PLANE self-authorizes

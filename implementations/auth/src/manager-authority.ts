@@ -326,7 +326,7 @@ async function authenticateRegisteredManager(
 
 /**
  * Host-side first-run admission for a registered signerless manager. The manager is trusted only to
- * forward the `ep.v1` request subject it served, and only once for a request this host observed its
+ * forward the versioned-rail request subject it served, and only once for a request this host observed its
  * caller publish. Everything else is derived here: the caller and generation come from the
  * subject, the evidence and live sources from the issued store, the ceiling from that evidence.
  * Every refusal happens before the create; an observed forward whose run is already admitted for

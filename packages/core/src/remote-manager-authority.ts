@@ -779,7 +779,7 @@ export function parseRemoteManagedAgentRuntimeResult(raw: unknown, request: Remo
  * Closed first-run admission for one hosted `run-start`, asked by a registered signerless manager.
  *
  * This is delegation to the registered trusted host, not a cryptographic proof of an arbitrary
- * forwarded message. The manager forwards the authenticated `ep.v1` request subject it served; the
+ * forwarded message. The manager forwards the authenticated versioned-rail request subject it served; the
  * host authenticates the manager's registration (account, owner, instance, lifecycle, process
  * epoch, current-registration proof), re-parses the subject itself, independently resolves the
  * issued generation it names with live sources, checks that ceiling permits that exact run-start

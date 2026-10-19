@@ -12,7 +12,7 @@
 import {
   createSpaceAuth, mintCreds, newIdentity, mintLifecycleUid,
   epRequestGrantRows, epJournalGrantRow, epCallerReplyGrantRow, epGoalProgressGrantRow,
-  epCallerGrantRows, epServeSubscribeRows, epServePublishRows, epServeGrantRows,
+  epCallerGrantRows, epServeSubscribeRows, epServePublishRows, epServeGrantRows, servedRunRequestSubjects,
   epBaselineGrantRows, spawnCallerCapabilities, runCallerCapabilities, operatorInstrumentCapabilities, permissionsFor,
   MAX_CONTROL_LINE_BYTES, CONNECT_ENVELOPE_OVERHEAD_BYTES, MAX_MINTED_JWT_BYTES,
   type EpCapability, type EpCaller,
@@ -199,6 +199,9 @@ throws("serve bundle refuses an EXPLICIT describe (reserved, derived in this one
   () => epServeGrantRows("demo", { endpoint: "manager", instanceId: IID, epoch: 5, ephemeralCommands: ["spawn", "describe"] }));
 c("no serve rail row crosses commands (no bare cross-command tail)",
   serve.sub.filter((r) => !r.endsWith(".fire")).every((r) => r.includes(".spawn.") || r.includes(".describe.")));
+c("servedRunRequestSubjects: issued inst + one routes for run-start/run-resume/run-answer, plus legacy inst + one for run-answer only",
+  servedRunRequestSubjects("demo").join("|")
+  === "cotal.demo.ep.v1.inst.manager.*.run-start.>|cotal.demo.ep.v1.one.manager.run-start.>|cotal.demo.ep.v1.inst.manager.*.run-resume.>|cotal.demo.ep.v1.one.manager.run-resume.>|cotal.demo.ep.v1.inst.manager.*.run-answer.>|cotal.demo.ep.v1.one.manager.run-answer.>|cotal.demo.ep.inst.manager.*.run-answer.>|cotal.demo.ep.one.manager.run-answer.>");
 
 // ── the minted credential carries exactly these rows (permissionsFor wiring) ──
 const auth = await createSpaceAuth("epg");

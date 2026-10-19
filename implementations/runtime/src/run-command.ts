@@ -612,7 +612,7 @@ async function askHost(values: RunValues, command: string, args: Record<string, 
   const nc = await dialerFor(t.server)({ servers: t.server, ...connectOpts, maxReconnectAttempts: 0 });
   try {
     // A logged-in user's manager view is issued at the callout (SPEC 13.15): its generation is read
-    // back from this connection's accepted row, and every request rides `ep.v1` under it.
+    // back from this connection's accepted row, and every request rides the versioned rail under it.
     const caller = auth.bearer !== undefined && auth.managerInstanceId !== undefined
       ? await issuedUserCaller(nc, t.space, String(connectOpts.name), who.caller)
       : who.caller;

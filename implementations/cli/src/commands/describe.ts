@@ -63,7 +63,7 @@ async function epConnection(
     ? { creds: t.auth.creds, tls: t.auth.tls === true }
     : { bearer: t.auth.bearer!, sentinelCreds: t.auth.sentinelCreds!, tls: t.auth.tls === true });
   const nc = await dialerFor(t.server)({ servers: t.server, ...connectOpts, maxReconnectAttempts: 0 });
-  // A logged-in user's manager view is issued (SPEC 13.15): its requests ride `ep.v1` under the
+  // A logged-in user's manager view is issued (SPEC 13.15): its requests ride the versioned rail under the
   // generation this connection's accepted row names.
   if (t.auth.bearer !== undefined && t.auth.managerInstanceId !== undefined) {
     try {
