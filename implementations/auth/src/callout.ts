@@ -32,10 +32,11 @@ import {
   type AuthorizationRequest,
 } from "@nats-io/jwt";
 import { createAccount, createCurve, fromCurveSeed, fromPublic, fromSeed } from "@nats-io/nkeys";
-import { assertInboxConnId, newIdentity, principalKey, principalTags, token } from "@cotal-ai/core";
+import { assertInboxConnId, calloutReaderId, newIdentity, principalKey, principalTags, token } from "@cotal-ai/core";
 import type { JWTVerifyGetKey, CryptoKey } from "jose";
 import { validateUserToken, type ValidatedUserToken } from "./token.js";
 import { SESSION_EXP } from "./permissions.js";
+import type { NativeIssuanceRecorder } from "./native-issuance.js";
 
 /** The one subject the callout serves (ADR-26). */
 export const AUTH_CALLOUT_SUBJECT = "$SYS.REQ.USER.AUTH";
@@ -166,8 +167,15 @@ export interface StartAuthCalloutOpts {
    *  the NATS-minted `req.user_nkey` — the builder scopes the private reply inbox `_INBOX_<connId>.>` on
    *  it. The client picks and passes this nonce because neither it nor this callout knows the per-connect
    *  nkey pre-connect; core's `assertInboxConnId` rejects a nonce with subject metacharacters, so it
-   *  cannot widen the grant. An absent/invalid nonce makes the builder throw → a signed deny. */
-  permissionsFor: (t: ValidatedUserToken, connId: string) => Record<string, unknown> | Promise<Record<string, unknown>>;
+   *  cannot widen the grant. An absent/invalid nonce makes the builder throw → a signed deny.
+   *  `readerId` is core's `calloutReaderId` of this connection, which keys the observer and admin
+   *  profiles' history-reader deletes: the client chooses the nonce, so the nonce cannot key them. */
+  permissionsFor: (t: ValidatedUserToken, connId: string, readerId: string) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  /** REQUIRED: durably record the minted JWT's broker user key (`req.user_nkey`) against the validated
+   *  principal BEFORE the response leaves (SPEC 13.1 `natkey.`). Awaited; a throw becomes the signed
+   *  deny and the minted JWT is never sent. A thrown record write may still have landed: evidence of
+   *  an issuance, never proof a client received the JWT or the connection was accepted. */
+  recordIssuance: NativeIssuanceRecorder;
   /** Diagnostics sink (default: console.error). Never carries bearer contents. */
   log?: (line: string) => void;
   /** Audit hook fired on each successful mint, BEFORE the response is sent — the minted user JWT
@@ -184,6 +192,7 @@ export function startAuthCallout(nc: CalloutConnection, opts: StartAuthCalloutOp
   const responseSigner = fromSeed(new TextEncoder().encode(opts.authAccount.signingSeed));
   const userSigner = fromSeed(new TextEncoder().encode(opts.dataAccount.signingSeed));
   if (!opts.space) throw new Error("auth callout: space is required");
+  if (typeof opts.recordIssuance !== "function") throw new Error("auth callout: recordIssuance is required - refusing to start a callout whose successes leave no native-key issuance evidence");
   const log = opts.log ?? ((l: string) => console.error(l));
   const enc = (s: string) => new TextEncoder().encode(s);
   const dec = (u: Uint8Array) => new TextDecoder().decode(u);
@@ -269,7 +278,11 @@ export function startAuthCallout(nc: CalloutConnection, opts: StartAuthCalloutOp
         // injected permissionsFor hook (which could be any implementation). assertInboxConnId throws on a
         // missing/wildcard name → the catch below turns it into a signed deny (fail-closed).
         const inboxNonce = assertInboxConnId(req.connect_opts?.name ?? "");
-        const { [SESSION_EXP]: sessionExp, ...perms } = await opts.permissionsFor(validated, inboxNonce);
+        // The history-reader deletes key on what the SERVER assigned this connection, never on the
+        // nonce: a client that named another connection's nonce would otherwise be granted the
+        // deletes of that connection's readers. A request without a client id throws → signed deny.
+        const readerId = calloutReaderId(req.server_id.id, req.client_info?.id as number);
+        const { [SESSION_EXP]: sessionExp, ...perms } = await opts.permissionsFor(validated, inboxNonce, readerId);
         // #2312: a session-caller connection carries EXACTLY the static arm's expiry, the grant's,
         // and only when the permission builder vouched for it from the live session row.
         const exp = validated.act.view === "session-caller" ? sessionExp : validated.exp;
@@ -290,6 +303,7 @@ export function startAuthCallout(nc: CalloutConnection, opts: StartAuthCalloutOp
           { ...perms, tags: principalTags(validated.owner, validated.act.actor) },
           { signer: userSigner, exp }, // NATS access dies with the bearer (a session-caller: with its grant)
         );
+        await opts.recordIssuance({ userNkey: req.user_nkey, token: validated, connId: inboxNonce, iat: decode(userJwt).iat, exp });
         opts.onMint?.({ jwt: userJwt, principal: key, exp });
         await respond({ jwt: userJwt });
       } catch (e) {

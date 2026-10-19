@@ -6,6 +6,7 @@ import { remoteManagerRegistrationProof } from "../../auth/src/authority-client.
 export async function nativeRemoteManager(args: {
   space: string; servers: string; root: string; exchangeUrl: string;
   execution: "runtime" | "none";
+  runtime?: string;
   call: (request: any) => Promise<any>;
 }) {
   const state = r.loadOrCreateRemoteManagerIdentity(args.root, args.space);
@@ -37,7 +38,7 @@ export async function nativeRemoteManager(args: {
     ...(args.execution === "runtime" ? { runHosting: r.remoteRunHosting({ state, owner, registrationProof: proof, accountPublicKey: standing.accountPublicKey, processEpoch: epoch, requestRunAdmission: args.call, requestRunAttempt: args.call, requestRunRevoke: args.call, call: args.call }) } : {}),
   };
   const manager = new Manager({ space: args.space, servers: args.servers, workspaceRoot: args.root, execution: args.execution,
-    ...(args.execution === "none" ? { pooled: true } : { runtime: "pty" }), remoteAuthority: remote });
+    ...(args.execution === "none" ? { pooled: true } : { runtime: args.runtime ?? "pty" }), remoteAuthority: remote });
   await manager.start();
   return { manager, state, owner, epoch, remote };
 }

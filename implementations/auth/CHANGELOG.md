@@ -1,5 +1,54 @@
 # @cotal-ai/auth
 
+## 0.86.0
+
+### Minor Changes
+
+- be2c0d8: Every auth-callout success now records its broker-generated user key before the minted JWT leaves. `startAuthCallout` takes a required `recordIssuance`, and refuses to start without one. The authority plane's recorder writes one create-only `natkey.<userNkey>` row in the space's auth bucket with the bearer's own space, owner, actor, lifecycle, credential and view and the minted JWT's `iat`/`exp`, then re-checks the connect authority before the response. A failed write, an existing row for the key, or a revocation seen by that re-check is a signed deny. The plane removes rows only after their `exp` plus the clock tolerance, at boot and on a timer (`nativeIssuancePruneMs`, default 60 s), with the bucket's marker TTL on each purge marker; a corrupt row fails the open or fences the plane. Core adds `nativeIssuanceKey`. Connections admitted before this change, and static JWTs, have no row.
+
+### Patch Changes
+
+- f1c80e4: `cotal agent-bearer --manager-call` is now told to name a manager with `--manager-instance <instanceId>` when an owner has more than one live manager. Before, it was told to use the instance argument, which only an agent's tools take. The exchange names `--manager-instance` for every actor-token caller, because `cotal agent-bearer` is that arm's one client, and the connector renames it to the `instance` argument when it runs the command for a tool. The refusal still refuses and still lists the owner's live manager instance ids.
+- 9f12f90: The first IdP pin is now written by exclusive create. Two processes enabling user auth on one state dir at once used to both succeed, each holding its own IdP while `idp.json` named only the last writer. Now one pin wins: the other caller adopts it when it names the same IdP and is refused with the usual re-key message when it does not.
+- b62ddda: When every remote manager an owner registered has exited, the manager-caller refusal now tells the owner to start one with `cotal supervise`. It used to suggest naming an instance with `managerInstanceId`, which cannot revive a dead manager. The call is still refused and is never routed to the local manager.
+- 720a01d: The auth service now records a manager-caller connection's credential expiry in the issued evidence it writes for that connection's generation. After the credential expires, the generation no longer resolves and is refused with `generation <id> expired at <exp> (SPEC 13.15)`. A run admitted while the generation was live keeps its admission and keeps renewing.
+- 56fbdb4: A manager-authority answer whose body is not JSON now fails the request with an error that names the operation, the endpoint and the HTTP status. Before, the client replaced such a body with an empty object, so a 200 answer resolved as an empty result the endpoint never sent, and a refusal read the same as a refusal with an empty JSON body.
+- 8d97d8a: Callers can name a manager instance wherever a user-auth mesh with several live managers for one owner asks them to. `cotal models` and every hosted `cotal run` verb take `--on <instance>`, and MCP `cotal_run` and `cotal_personas` take an `instance` argument under the same rules as `cotal_spawn`'s. A `cotal` command run from a managed seat's shell now selects the manager that launched the seat (`COTAL_MANAGER_INSTANCE`), as the seat's tools already did, unless `--on` names another. The ambiguity refusal still refuses, and now lists the owner's live manager instance ids and names the caller's own remedy: `--on <instanceId>` for the CLI, the `instance` argument for an agent's tools. Before, it named `--manager-instance`, which only `cotal agent-bearer` takes, so none of these callers could answer it.
+- Updated dependencies [598d0dd]
+- Updated dependencies [be2c0d8]
+- Updated dependencies [140c0d4]
+- Updated dependencies [1d92ef7]
+- Updated dependencies [91663dc]
+- Updated dependencies [31dccc4]
+- Updated dependencies [15043fa]
+- Updated dependencies [1dd5baf]
+- Updated dependencies [1fd3cb4]
+- Updated dependencies [fba88b0]
+- Updated dependencies [b7f4af7]
+- Updated dependencies [7a2c574]
+- Updated dependencies [add70b8]
+- Updated dependencies [e754d4f]
+- Updated dependencies [664e9df]
+- Updated dependencies [8d97d8a]
+- Updated dependencies [830d66b]
+- Updated dependencies [516c8f6]
+- Updated dependencies [00f631a]
+- Updated dependencies [ab30526]
+- Updated dependencies [df063ef]
+- Updated dependencies [958e6cb]
+- Updated dependencies [ee42687]
+- Updated dependencies [d4a745f]
+- Updated dependencies [3c0a830]
+- Updated dependencies [4f49cea]
+- Updated dependencies [6d5462d]
+- Updated dependencies [c2e7648]
+- Updated dependencies [12344fb]
+- Updated dependencies [1eaf6e3]
+- Updated dependencies [3b93aa2]
+  - @cotal-ai/core@0.86.0
+  - @cotal-ai/workspace@0.86.0
+  - @cotal-ai/lang@0.86.0
+
 ## 0.85.0
 
 ### Patch Changes

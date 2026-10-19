@@ -1,5 +1,54 @@
 # @cotal-ai/cli
 
+## 0.86.0
+
+### Minor Changes
+
+- 31dccc4: A Claude app conversation can join a local mesh. `serveGatewayStdio(host, options)` in `@cotal-ai/connector-core` serves the remote gateway's tools over stdio, so a local MCP server offers the same `cotal_connect`, `cotal_wait` and routed tools as the hosted connector without importing an MCP SDK. The hidden `cotal app-identity` plumbing command opens one conversation's own identity on the selected mesh: it answers `taken` for a live name, takes its channels and role from the mesh's default persona, provisions the identity's own delivery durables on a mesh with static credentials, and writes the credential to a 0600 file that never appears on stdout. `cotal app-identity retire --dir` removes the identity's broker footprint and then that file, and each provision retires what a host that exited without retiring left behind. A mesh that uses per-user sign-in is refused. The Claude Code plugin's server now serves those tools to a session Cotal did not launch, in place of `cotal_how_to_join`, and joins only when the conversation calls `cotal_connect`. `cotal setup` records the CLI's own argv beside the plugin, so that server runs the CLI by absolute path; a connector's install action receives it as `ConnectorSetupInput` from `@cotal-ai/core`. Started with `--desktop`, the same server suits Claude Desktop, whose working directory is no project. Without `--space`, provision sweeps the registry first, as `cotal spawn` does, so a recorded mesh whose broker is down no longer makes the choice ambiguous. A conversation in a Claude Code session is woken when a message arrives: the plugin declares a monitor, each local server writes the connection id of each wake to a private socket of its own, and the monitor turns each valid id into a fixed event line, so no socket text reaches the model. `GatewayOptions.wake` in `@cotal-ai/connector-core` is the hook for this: it signals a connection once until it is read, never while a `cotal_wait` holds it, and again when a client starts listening, and `cotal_connect` says whether the client will be woken. `GATEWAY_INSTRUCTIONS` now tells a conversation how to keep listening when asked, and is exported in two parts, `GATEWAY_CONNECTING` and `GATEWAY_LISTENING`. Claude Code runs the `cotal` plugin in place from the copy `cotal setup` materializes under `~/.cotal/claude-plugin`, and before this change neither a repeat `cotal setup` nor `cotal update` rewrote that copy, so after an upgrade plain sessions kept starting the old server, hooks and monitor. A setup provider can now declare `refresh` (`ConnectorSetupProvider.refresh` in `@cotal-ai/core`), which brings what it installed to this release and installs nothing new; a repeat `cotal setup` and `cotal update` run it, and `cotal update` fails when the refresh fails. The copy's version is now the release plus a digest of its files, and `cotal status` reports the plugin as current or stale against it, in place of only whether it is installed. `cotal setup` always runs `claude plugin marketplace update` after adding the marketplace, since Claude Code 2.1.295 answers a repeat add with wording the old check did not match. On macOS and Windows, where Claude Desktop is installed, `cotal setup` adds a `cotal` server to Desktop's `claude_desktop_config.json` that runs the same server with `--desktop`, keeps every other entry, refuses a file that is not valid JSON, and the refresh keeps the entry current; `cotal status` reports it.
+
+### Patch Changes
+
+- 1dd5baf: A control command run without `--space` now probes the registered brokers once per resolve. Before this, the control resolver probed every non-catalog record for its mode check, and the connect helper probed them all again before it chose the target; `cotal update`'s manager continuity check added a third round of probes. Each round could wait out the confirming timeout on a record that did not answer, and a broker that started or stopped between rounds could leave the mode check and the connect resolving different targets. `ConnectFlags` now carries the sweep's `offline` set, and `resolveControlTarget`, `resolveTargetOrThrow`, `connectOrThrow`, `connectUserControlOrThrow` and their exiting forms read it instead of sweeping again. A named `--space` still skips the sweep.
+- 990148a: Keep the manager's delivery-aware marker, shutdown intent and spare capability when `cotal down` does not stop every selected component. The manager stop no longer removes them itself: `down` removes them after its all-stopped gate, and the `cotal up` teardowns and the delivery cutover preflight remove them after their own stop.
+- 24212bc: `cotal backup create`, restore and quarantine now fail after 15 seconds when their isolated bootstrap broker stays alive but never accepts connections. The reachability wait recomputed its bound on every pass, so only the 30-minute operation deadline ended it.
+- 8d97d8a: Callers can name a manager instance wherever a user-auth mesh with several live managers for one owner asks them to. `cotal models` and every hosted `cotal run` verb take `--on <instance>`, and MCP `cotal_run` and `cotal_personas` take an `instance` argument under the same rules as `cotal_spawn`'s. A `cotal` command run from a managed seat's shell now selects the manager that launched the seat (`COTAL_MANAGER_INSTANCE`), as the seat's tools already did, unless `--on` names another. The ambiguity refusal still refuses, and now lists the owner's live manager instance ids and names the caller's own remedy: `--on <instanceId>` for the CLI, the `instance` argument for an agent's tools. Before, it named `--manager-instance`, which only `cotal agent-bearer` takes, so none of these callers could answer it.
+- 958e6cb: `cotal_roster`, `cotal ps`, `cotal status`, `cotal endpoints`, `cotal console` and `cotal join` print each peer's condition code and activity on one line and at most 200 characters. A control character or Unicode line separator shows as a `\uXXXX` escape, so a peer can no longer split its row into what reads as a second roster entry, pass terminal control bytes through, or flood every row with a 4000-character activity. The rule is `presenceText` in `@cotal-ai/core`, and `oneLine` moved there from `@cotal-ai/workspace`, which still re-exports it.
+- ee42687: The seed reconcile reads a built-in's `package.json` once per check. `installedExtensionPackage` returns the installed version and declared `main` from that one read, with the error policy `installedExtensionVersion` already had, and the entry-file check takes `main` from it. The check used to parse the file a second time and treat any failure of that read as a missing entry file, so a permission error there made `cotal ext seed --repair` silently reinstall the built-in, or report a torn install while the entry file existed. A read failure now surfaces as the error it is.
+- d4a745f: Smoke comments and check labels in core, cli and manager name the function, branch or SPEC section they point at instead of a line number that drifts with every edit above it. No behavior changes.
+- d5103e3: `cotal up` proves a surviving restore or ordinary-resume listener with one shared check. The two attempt kinds used to carry separate copies of the same ownership proof, so a check tightened in one could silently miss the other. Each kind now supplies only its own journal match and store path.
+- 1eaf6e3: `cotal status --components` now names the HTTP status when the web dashboard's address answers `/api/meta` with a status outside 2xx, such as `HTTP 401`. It used to read the body first, so a plain-text or empty refusal printed `http not answered`. The status row and `cotal web --detach` now send one shared readiness request from `@cotal-ai/workspace` and read its answer the same way. That request no longer follows a redirect, so the readiness header goes only to the recorded address and a 3xx answer is reported as its status, such as `HTTP 302`, where both used to follow it and accept the identity the redirect target answered with.
+- Updated dependencies [598d0dd]
+- Updated dependencies [be2c0d8]
+- Updated dependencies [140c0d4]
+- Updated dependencies [1d92ef7]
+- Updated dependencies [91663dc]
+- Updated dependencies [31dccc4]
+- Updated dependencies [15043fa]
+- Updated dependencies [1dd5baf]
+- Updated dependencies [1fd3cb4]
+- Updated dependencies [fba88b0]
+- Updated dependencies [b7f4af7]
+- Updated dependencies [7a2c574]
+- Updated dependencies [664e9df]
+- Updated dependencies [8d97d8a]
+- Updated dependencies [830d66b]
+- Updated dependencies [516c8f6]
+- Updated dependencies [00f631a]
+- Updated dependencies [ab30526]
+- Updated dependencies [df063ef]
+- Updated dependencies [958e6cb]
+- Updated dependencies [ee42687]
+- Updated dependencies [d4a745f]
+- Updated dependencies [3c0a830]
+- Updated dependencies [4f49cea]
+- Updated dependencies [6d5462d]
+- Updated dependencies [c2e7648]
+- Updated dependencies [12344fb]
+- Updated dependencies [1eaf6e3]
+- Updated dependencies [3b93aa2]
+  - @cotal-ai/core@0.86.0
+  - @cotal-ai/workspace@0.86.0
+
 ## 0.85.0
 
 ### Patch Changes

@@ -1,5 +1,52 @@
 # @cotal-ai/manager
 
+## 0.86.0
+
+### Patch Changes
+
+- 6bec40e: The manager's doc comment on its launch capability check now says spawn and resume both ask before a seat's launch is built. It used to say they ask before any reserve or mint, which resume does not do: its batch reserves the retained names before the check runs. No behavior changes.
+- b7f4af7: `@cotal-ai/core` now exports `digestIdToken`, the one recipe behind every id derived from a digest (the 43-character base64url sha256). Run notice and migration ids, checkpoint answer ids, the runtime's derived pause tokens and the manager's turn hold token all use it. Before this, each module kept its own copy, so a change to one copy could pass the typecheck and quietly stop matching the ids the others derive. The derived ids are unchanged.
+- 21fc39f: The instance-pin smoke grades its two recovery-counter cells against the re-issues that left the caller. In a two-manager space a re-issue rides the same class queue and can be refused again, so one call may recover several splits, and the cells asserted exactly one and went red on correct runs. Each now requires the counter to move and to equal the number of re-issued requests. No behavior changes.
+- 21fc39f: The instance-pin smoke's admin sweep now sends `transcript-receive` schema-valid nonsense arguments: a random digest, size 0, and session and host names that match nothing. It used to send `{}`, which the envelope refused on `required` before publishing, so the command never reached a responder and the cell that proves every admin command reaches the guard failed on every run. No behavior changes.
+- 425a5e9: `@cotal-ai/manager` now exports `managerBrowserContractSource()`, the manager's registered cluster document with its closure digest and each distinct schema root. A host passes it to `generateBrowserContracts` from `@cotal-ai/core/browser-validators-build` to build the manager's browser validators. Before, the root exported only the document and digests, so no supported import carried the schema roots. Served commands, digests, wire, auth and runtime behavior are unchanged.
+- 88dcd93: Remove the internal review attributions from the static lifecycle module's comments, which the published build carried. Each comment keeps the reason it gives.
+- d4a745f: Smoke comments and check labels in core, cli and manager name the function, branch or SPEC section they point at instead of a line number that drifts with every edit above it. No behavior changes.
+- a65de85: The manager no longer keeps every spawn acceptance for the life of its process. An acceptance is dropped five minutes after its goal ends, and an in-flight goal's acceptance is never dropped. A resubmission of a goal that has ended is answered from the goal's terminal and is never accepted again: a `succeeded` goal returns the same acceptance, and any other outcome is refused `failed-precondition` with its terminal attached. Before, a resubmission the manager no longer held in memory, such as one after a restart, ran the accept again and was refused with an error telling the caller to reconcile the store.
+- 74cb04f: `cotal supervise --space <s>` now starts on a root that hosts several spaces when `<s>` has no registry entry. The root's account record for `<s>` counted as the host proof only while `<s>` was the root's sole space, so a second space made the manager exit before readiness with the ambiguity error that asks for the space it was given.
+- c39d2a7: `cotal supervise` now handles `SIGTERM` and `SIGINT` from the moment it starts. Before, its handlers were installed only after the manager finished starting, so a signal during startup killed the process with its liveness lease still held: no warning printed, and an immediate restart from the same workspace root was refused with `already serves ... stop it first` until the lease's 10 second TTL lapsed. A signal during startup now waits for the start to settle and runs the normal stop, which releases the lease. The process then exits 0, or, when the start itself failed, prints that error and exits 1.
+- Updated dependencies [598d0dd]
+- Updated dependencies [be2c0d8]
+- Updated dependencies [140c0d4]
+- Updated dependencies [1d92ef7]
+- Updated dependencies [91663dc]
+- Updated dependencies [31dccc4]
+- Updated dependencies [15043fa]
+- Updated dependencies [1dd5baf]
+- Updated dependencies [1fd3cb4]
+- Updated dependencies [fba88b0]
+- Updated dependencies [b7f4af7]
+- Updated dependencies [7a2c574]
+- Updated dependencies [664e9df]
+- Updated dependencies [8d97d8a]
+- Updated dependencies [830d66b]
+- Updated dependencies [516c8f6]
+- Updated dependencies [00f631a]
+- Updated dependencies [ab30526]
+- Updated dependencies [df063ef]
+- Updated dependencies [958e6cb]
+- Updated dependencies [ee42687]
+- Updated dependencies [d4a745f]
+- Updated dependencies [3c0a830]
+- Updated dependencies [4f49cea]
+- Updated dependencies [6d5462d]
+- Updated dependencies [c2e7648]
+- Updated dependencies [12344fb]
+- Updated dependencies [1eaf6e3]
+- Updated dependencies [3b93aa2]
+  - @cotal-ai/core@0.86.0
+  - @cotal-ai/workspace@0.86.0
+  - @cotal-ai/seat@0.86.0
+
 ## 0.85.0
 
 ### Patch Changes

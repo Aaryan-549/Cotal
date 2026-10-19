@@ -34,6 +34,63 @@ What this page does not promise is a rolling upgrade. Nothing in the current lin
 authority versions, so where broker and manager run separately there is a window in which the mesh
 is down. The sections below give that window's shape so it can be scheduled rather than endured.
 
+## History reader deletes after 0.86.0
+
+Observer and admin credentials now carry a `CONSUMER.DELETE` row for each of the connection's eight
+history-reader names, `hist_<readerId>_<n>`, on CHAT (and on DM for admin). `channelHistory`,
+`multiChannelHistory` and `dmHistory` read under those names and delete each reader when its step
+ends. Before this, every read left its consumers for five minutes, and a dashboard polling history
+filled the stream's consumer limit until reads were refused with "maximum consumers limit reached".
+
+### What stops working
+
+A static observer or admin credential minted by 0.86.0 or earlier has no reader-delete rows. On it,
+a current client's history read fails with "it predates the observer and admin reader-delete grant,
+so remint it", and leaves one reader per stream until the broker's five-minute inactive threshold.
+A credential the CLI mints at start (`cotal console`, `cotal web` on a static auth mesh) is current
+after the upgrade.
+
+### Before the upgrade
+
+- Remint every observer or admin credential a process reads from a file: `cotal mint <name> --profile
+  observer` or `--profile admin`, and any `--creds` file given to a dashboard.
+- On a user-auth mesh, the auth service mints these views per connection. Upgrade it before, or with,
+  the hosts that read history, so no current client connects through an older auth service.
+
+## Native key issuance recording after 0.85.0
+
+Before upgrading, take a consistent backup of broker JetStream state and the auth host's private
+configuration and signing material through the deployment's supported backup procedure. The auth
+bucket must use file storage. Allow space for one issuance record per new callout exchange until
+its minted expiry plus clock tolerance; static credentials have no such record.
+
+Embedders that call `startAuthCallout` must supply the required `recordIssuance` callback. It must
+finish a durable create-only write for the broker-generated user key and recheck the validated
+lifecycle and credential authority before returning. A missing callback refuses startup; a failed
+write or recheck denies the exchange. Do not use the isolated tests' no-op callbacks in a deployment.
+The stock `startAuthService` authority plane wires the recorder and its pruning automatically.
+Existing auth records need no manual rewrite, and no tenant or participant grant is added.
+
+For split deployments, pause new managed launches and stop every old auth-callout responder before
+starting the matched new auth service. A mixed responder pool can still issue keys without records.
+New connections and reconnects cannot authenticate while the callout service is down. Existing
+broker connections keep their current JWT expiry; this change needs no broker restart. Upgrade the
+CLI, Manager and connector packages together before admitting new managed launches, using the
+runtime's supported Manager custody or recovery path. This source change does not promise that
+running seats survive a Manager restart.
+
+The new service prunes expired issuance rows before opening and on a timer. A corrupt row refuses
+opening or fences the running authority plane; investigate the stored evidence through the normal
+operator recovery procedure. Do not erase the auth bucket or recreate signing keys to clear it.
+Rows written before a later authority-check failure can remain until pruning; they do not prove
+that a client received a JWT or established a connection.
+
+Connections admitted before the last old responder stopped, static JWTs and old responders have no
+issuance record. They are not backfilled or identified from names. Bearers without current lifecycle
+and credential claims cannot be recorded and are refused; use the supported enrollment or renewal
+path for the selected release. These records alone do not provide persistent native-key cutoff or
+complete revocation. Reintroducing an old responder also reopens the recording gap.
+
 ## Native Claude MCP discovery after 0.82.2
 
 Before upgrading, snapshot Cotal configuration and the Claude profile on each launch host.

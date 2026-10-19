@@ -69,7 +69,7 @@ import { makePlatformControlAuthority, makePlatformControlReadiness, requireMana
 import { OwnedConnections, type AuthConnectionState, type AuthServiceClosed } from "./owned-connections.js";
 import { makePlatformSupervisorAuthority, makePlatformSupervisorEnd, platformSupervisorEnded, requirePlatformSupervisorAdmin, type PlatformSupervisorInput, type PlatformSupervisorAuthorityRequest } from "./platform-supervisor.js";
 import { startAuthCallout } from "./callout.js";
-import { createIdpBridge, verifyIdpToken, type IdpBridge } from "./idp.js";
+import { createIdpBridge, verifyIdpToken, verifyToolResultHumanProof, type IdpBridge } from "./idp.js";
 import { PUBLIC_EXCHANGE_VIEWS, assertTransferWriterClaim, type UserTokenSession, type UserTokenView, type ValidatedUserToken } from "./token.js";
 import { grantCoordinates, verifySessionRedemption } from "./session-redemption.js";
 import { pinnedJwksResolver, type UserTokenIssuer } from "./issuer.js";
@@ -84,6 +84,7 @@ import { validateRetainedManagedAgent } from "./continuity.js";
 import { reconstructRemoteManagerServeGrant, remoteManagerServeGrantFromCluster, remoteManagerSurface, type ManagerCluster } from "./manager-contract.js";
 import { authorityBarrierGrants, authorityWriterGrants, openAuthorityClient, openSupervisedConnectReader, platformReadinessGrants, remoteManagerIssuerGrants, remoteManagerRegistrationProof, registrationExecutorGrants, servedRunRequestSubjects, type AuthorityClient } from "./authority-client.js";
 import { authorizeConnectCredential } from "./connect-reader.js";
+import { makeNativeIssuanceRecorder, pruneNativeIssuance, type NativeIssuanceRecorder } from "./native-issuance.js";
 import { ensureRootCredential } from "./root-credential.js";
 import { activateLifecycleAtUid, observeGate, openLifecycleRegistry, readLifecycleHeadForOperation, type LifecycleRegistry } from "./lifecycle-registry.js";
 import { openAuthLedgerScannerCandidate } from "./ledger-scanner.js";
@@ -143,6 +144,9 @@ export const MANAGED_RETIRE_PATH = "/managed-lifecycle/retire";
  *  derives the caller's scope from the local ledger and never accepts one from the caller. */
 export const VERIFY_ENROLLMENT_PATH = "/manager-service-authority/verify-enrollment";
 
+/** Host-only, capability-gated proof decision. It neither signs consent nor serves results. */
+export const TOOL_RESULT_HUMAN_PROOF_PATH = "/tool-result-human-proof/verify";
+
 /** Failed-exchange rate limit: at most this many REFUSED exchanges per rolling minute; further
  *  attempts get 429 until the window drains. Successes are unthrottled (the CLI's normal path). */
 const FAILED_EXCHANGE_PER_MIN = 30;
@@ -174,12 +178,33 @@ type Values = Record<string, string | undefined>;
 /** Which exchange arm asks for a manager-caller view. */
 export type ManagerCaller = "human" | "agent";
 
-/** How each caller names one manager instance, for the refusal that needs it to. */
+/** How each caller names one manager instance, for the refusal that needs it to. The agent arm's
+ *  one client is `cotal agent-bearer`; a connector that runs it for a tool renames the flag to the
+ *  tool's `instance` argument. */
 const MANAGER_PIN_REMEDY: Record<ManagerCaller | "wire", string> = {
   human: "name one with --on <instanceId>",
-  agent: "name one with the instance argument",
+  agent: "name one with --manager-instance <instanceId>",
   wire: "name one as managerInstanceId",
 };
+
+/** One Manager instance of an owner, as `/manager-instances` lists it. `state` is the verdict
+ *  selection reads: `candidate` is an open gate of this owner whose current service registration and
+ *  status match the gate's registration revision and process epoch. That is registration evidence,
+ *  not proof the instance answers now; a describe pinned to the instance proves that. */
+export interface ManagerInstanceRecord {
+  instanceId: string;
+  /** `remote` is an owner-registered Manager (`cotal supervise`); `local` is this host's own. */
+  placement: "remote" | "local";
+  state: "candidate" | "unknown" | "not open" | "not this owner's" | "not registered";
+}
+
+/** Every Manager gate of one owner at one scan. A failed scan is an error, never a partial list. */
+export interface ManagerInstanceCatalog {
+  v: 1;
+  owner: string;
+  complete: true;
+  instances: ManagerInstanceRecord[];
+}
 
 /** The service's AUTHORITY PLANE (R1, SPEC 13.1): the two self-minted data-account connections
  *  behind (a) the composed connect authorizer — the file-ledger arm PLUS the credential deny-new
@@ -187,10 +212,15 @@ const MANAGER_PIN_REMEDY: Record<ManagerCaller | "wire", string> = {
  *  ensure both exchange arms stamp `act.credentialId` from. */
 export interface AuthAuthorityPlane {
   authorizeConnect: (t: ValidatedUserToken) => Promise<void>;
+  /** The callout's required native-key issuance recorder (SPEC 13.1 `natkey.`): create-only, then
+   *  the same connect authority re-read before the minted JWT may leave. */
+  recordIssuance: NativeIssuanceRecorder;
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
-  /** `caller` picks the remedy an ambiguity refusal names: `--on` for the human (CLI) arm, the
-   *  tools' `instance` argument for a managed agent, the wire field otherwise. */
+  /** `caller` picks the remedy an ambiguity refusal names: `--on` for the human (CLI) arm,
+   *  `cotal agent-bearer`'s `--manager-instance` for the agent arm, the wire field otherwise. */
   selectManagerInstance: (owner: string, requested?: string, caller?: ManagerCaller) => Promise<string>;
+  /** The owner's Manager instances with the verdict selection reads; selection is built on it. */
+  listManagerInstances: (owner: string) => Promise<ManagerInstanceCatalog>;
   authorizeManagerCaller: (owner: string, instanceId: string) => Promise<void>;
   /** The callout's issuance of an interactive user's `manager-caller` view (SPEC 13.15): one
    *  issuer window that stages and releases evidence bound to the actor-ledger row and writes the
@@ -423,6 +453,8 @@ export interface OpenAuthAuthorityPlaneOptions {
   localManager?: () => ManagerInstanceIdentity | undefined;
   /** Bounded trusted-host-only standing renewable credential TTL option for rehearsal (default 24h). */
   standingRenewableTtlSeconds?: number;
+  /** How often expired native-issuance evidence is removed after the boot pass (default 60 s). */
+  nativeIssuancePruneMs?: number;
 }
 
 /**
@@ -630,6 +662,37 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
   const authAdmin = await openAuthAdminListener({ onConnection, server, space, dataAccount, reg: barrierReg, retirement, barrierFlight: retirementFlights, instanceId: authServeInstanceId, epoch: authServeGrant.epoch, grant: authServeGrant, log });
   unwind.push(() => authAdmin.close());
   const fileArm = ledgerAuthorizeConnect(opts.dir);
+  // The callout's issuance evidence: create-only natkey row, then the connect authority re-read
+  // in the same stream before the minted JWT may leave.
+  const recordIssuance = makeNativeIssuanceRecorder(registry, async (t) => {
+    refuseIfFenced();
+    fileArm(t);
+    await authorizeConnectCredential(reader.current(), t, Date.now);
+  });
+  // Expired evidence goes at boot (a failure refuses the open) and then on the plane's own timer;
+  // a failed pass fences the plane like a scanner death, never a silently unbounded recorder.
+  const pruneMs = opts.nativeIssuancePruneMs ?? 60_000;
+  if (!Number.isSafeInteger(pruneMs) || pruneMs < 100 || pruneMs > 3_600_000)
+    throw new Error(`nativeIssuancePruneMs must be an integer between 100 and 3600000 (got ${pruneMs})`);
+  await pruneNativeIssuance(registry, Math.floor(Date.now() / 1000));
+  let pruneTimer: ReturnType<typeof setTimeout> | undefined;
+  let pruneFlight: Promise<void> = Promise.resolve();
+  const schedulePrune = (): void => {
+    if (closing || fatalReason !== undefined) return;
+    pruneTimer = setTimeout(() => {
+      pruneFlight = pruneNativeIssuance(registry, Math.floor(Date.now() / 1000)).then(schedulePrune, (e: unknown) => {
+        if (closing) return;
+        const copy = `native-issuance cleanup failed: ${e instanceof Error ? e.message : String(e)}`;
+        hold?.fence(copy);
+        fatalReason = fatalReason ?? copy;
+        fireFatal(copy);
+        log(`auth-plane: ${copy}`);
+      });
+    }, pruneMs);
+  };
+  const stopPrune = async (): Promise<void> => { clearTimeout(pruneTimer); await pruneFlight; };
+  unwind.push(async () => { closing = true; await stopPrune(); });
+  schedulePrune();
   const recordsJsm = await jetstreamManager(remoteIssuer.nc);
   const authKv = await new Kvm(remoteIssuer.nc).open(epAuthBucket(space));
   const managerIssuanceGate = (instanceId: string) => serveIssuanceGateKv(authKv, space, { endpoint: "manager", instanceId });
@@ -684,17 +747,9 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
     if (status.observedSpecRevision < rec.revision || status.epoch !== gate.processEpoch) return "not registered";
     return "candidate";
   };
-  const selectManagerInstance = async (owner: string, requested?: string, caller?: ManagerCaller): Promise<string> => {
+  const listManagerInstances = async (owner: string): Promise<ManagerInstanceCatalog> => {
     refuseIfFenced();
-    if (requested !== undefined) {
-      const instanceId = assertLifecycleToken(requested, "managerInstanceId");
-      const verdict = await managerGate(owner, instanceId);
-      if (verdict !== "candidate") throw new Error(`manager instance ${instanceId} is ${verdict}`);
-      return instanceId;
-    }
-    const remoteInstances: string[] = [];
-    const remoteLive: string[] = [];
-    let localCandidate: string | undefined;
+    const instances: ManagerInstanceRecord[] = [];
     const localManager = loadLocalManager();
     for (const raw of await scanner.scanManagerGates()) {
       if (raw.op !== undefined) continue;
@@ -704,13 +759,25 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       const instanceId = assertLifecycleToken(parts[2], "managerInstanceId");
       const row = parseEndpointGate(raw.data, raw.key);
       if (row.authorityFamily === "environment-manager") continue;
-      if (row.principal === `${owner}.${remoteManagerActors(instanceId).serve}`) {
-        remoteInstances.push(instanceId);
-        if (await managerGate(owner, instanceId) === "candidate") remoteLive.push(instanceId);
-      } else if (localManager?.instanceId === instanceId && row.principal === `local.${localManager.serveIdentity.id}`) {
-        if (await managerGate(owner, instanceId) === "candidate") localCandidate = instanceId;
-      }
+      if (row.principal === `${owner}.${remoteManagerActors(instanceId).serve}`)
+        instances.push({ instanceId, placement: "remote", state: await managerGate(owner, instanceId) });
+      else if (localManager?.instanceId === instanceId && row.principal === `local.${localManager.serveIdentity.id}`)
+        instances.push({ instanceId, placement: "local", state: await managerGate(owner, instanceId) });
     }
+    return { v: 1, owner, complete: true, instances };
+  };
+  const selectManagerInstance = async (owner: string, requested?: string, caller?: ManagerCaller): Promise<string> => {
+    refuseIfFenced();
+    if (requested !== undefined) {
+      const instanceId = assertLifecycleToken(requested, "managerInstanceId");
+      const verdict = await managerGate(owner, instanceId);
+      if (verdict !== "candidate") throw new Error(`manager instance ${instanceId} is ${verdict}`);
+      return instanceId;
+    }
+    const { instances } = await listManagerInstances(owner);
+    const remoteInstances = instances.filter((i) => i.placement === "remote").map((i) => i.instanceId);
+    const remoteLive = instances.filter((i) => i.placement === "remote" && i.state === "candidate").map((i) => i.instanceId);
+    const localCandidate = instances.findLast((i) => i.placement === "local" && i.state === "candidate")?.instanceId;
     remoteLive.sort();
     if (remoteLive.length === 1) return remoteLive[0];
     if (remoteLive.length > 1)
@@ -776,11 +843,16 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       fileArm(t);
       await authorizeConnectCredential(reader.current(), t, Date.now);
     },
+    recordIssuance: (i) => {
+      refuseIfFenced();
+      return recordIssuance(i);
+    },
     mintConnectCredential: (args) => {
       refuseIfFenced();
       return ensureRootCredential(registry, { ...args, managerInstance: `auth-service:${space}` });
     },
     selectManagerInstance,
+    listManagerInstances,
     authorizeManagerCaller: async (owner, instanceId) => {
       refuseIfFenced();
       const verdict = await managerGate(owner, assertLifecycleToken(instanceId, "managerInstanceId"));
@@ -805,7 +877,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
           const perms = mint({ generation, acceptedToken });
           const ref = { space, owner, actor, uid, generation };
           const prepared = await session.store.stage({
-            version: 1, ref, sources: [actorLedgerSource(space, owner, actor, uid)], permissions: importNativeSubjectPermissions(perms),
+            version: 1, ref, sources: [actorLedgerSource(space, owner, actor, uid)], permissions: importNativeSubjectPermissions(perms), expiresAt: t.exp,
           });
           await session.store.release(prepared, async () => {});
           await writeAcceptedRow(session.accepted, acceptedToken, ref);
@@ -1659,6 +1731,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       // act), then the barrier that wrote it. An unreachable release keeps the barrier alive
       // for a later close retry; successful scanner teardown is not run a second time.
       closing = true;
+      await stopPrune();
       const scannerFlight = closeScanners ??= (async () => {
         await authAdmin?.close();
         const results = await Promise.allSettled([reader.close(), recordsScanner.close(), scanner.close()]);
@@ -2102,6 +2175,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
       space,
       token: { key: issuer.localKeySet(), issuer: issuer.issuer },
       authorizeActor: plane.authorizeConnect,
+      recordIssuance: plane.recordIssuance,
       permissionsFor: calloutPermissions(ledgerAclResolver(dir), plane.authorizeManagerCaller, plane.verifySession, plane.issueUserCaller),
       log: (l) => console.error(l),
     });
@@ -2157,6 +2231,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
       dir,
       mintConnectCredential: plane.mintConnectCredential,
       selectManagerInstance: plane.selectManagerInstance,
+      listManagerInstances: plane.listManagerInstances,
       verifySession: plane.verifySession,
     };
     const loopback = createServer((req, res) => void handle(req, res, ctx));
@@ -2423,6 +2498,7 @@ interface HandlerCtx {
    *  human arm stamps inside the bridge). */
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
   selectManagerInstance: AuthAuthorityPlane["selectManagerInstance"];
+  listManagerInstances: AuthAuthorityPlane["listManagerInstances"];
   verifySession: AuthAuthorityPlane["verifySession"];
 }
 
@@ -2600,16 +2676,18 @@ const ROUTES = new Map<string, RouteHandler>([
   ],
   ["/exchange", (req, res, ctx) => handleExchange(req, res, ctx, LOOPBACK_POLICY)],
   ["/manager-service-authority", (req, res, ctx) => handleManagerServiceAuthority(req, res, ctx, LOOPBACK_POLICY)],
+  ["/manager-instances", (req, res, ctx) => handleManagerInstances(req, res, ctx, LOOPBACK_POLICY)],
   [INTERACTIVE_RETIRE_PATH, handleInteractiveLifecycleRetirement],
   [MANAGED_RETIRE_PATH, handleManagedLifecycleRetirement],
   [VERIFY_ENROLLMENT_PATH, handleVerifyManagedAgentEnrollment],
+  [TOOL_RESULT_HUMAN_PROOF_PATH, handleToolResultHumanProof],
 ]);
 
 /** Route one HTTP request against the loopback route table. Errors are JSON `{ error }`. */
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx): Promise<void> {
   try {
     const route = ROUTES.get(req.url ?? "");
-    if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-service-authority/verify-enrollment, /interactive-lifecycle/retire, /managed-lifecycle/retire" });
+    if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-instances, /manager-service-authority/verify-enrollment, /interactive-lifecycle/retire, /managed-lifecycle/retire" });
     await route(req, res, ctx);
   } catch (e) {
     sendRequestError(res, e);
@@ -2948,6 +3026,41 @@ async function handleExchange(req: IncomingMessage, res: ServerResponse, ctx: Ha
   }
 }
 
+/** The signed-in person's own Manager instances, read-only, on both faces. The proof is the IdP JWT
+ *  the human exchange verifies, and the owner is derived from it the same way, so a caller lists only
+ *  its own owner's gates. A browser-origin request is refused as on every exchange route; an
+ *  embedding's server-side bridge forwards the person's proof. Issuance still re-checks the chosen
+ *  instance. */
+async function handleManagerInstances(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx, policy: ExchangePolicy): Promise<void> {
+  if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+  if (req.headers.origin !== undefined) return send(res, 403, { error: "browser-origin requests are not served here" });
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? ""))
+    return send(res, 415, { error: "content-type must be application/json" });
+  if (policy.requireCapability && req.headers.authorization !== `Bearer ${ctx.cap}`)
+    return refuseCapability(res, ctx, "missing/invalid exchange capability - read it from the space's auth-service.json");
+  const peer = policy.peerKey(req);
+  const peerThrottled = policy.throttled(ctx, peer);
+  const body = await readJsonBody(req) as { idpToken?: unknown } | null;
+  if (typeof body?.idpToken !== "string" || !body.idpToken)
+    return send(res, 400, { error: "the manager instance list needs { idpToken: string }" });
+  let owner: string;
+  try {
+    owner = deriveOwnerForIdpSubject(ctx.ownerSecret, ctx.bridgeIdp.issuer, (await verifyIdpToken(body.idpToken, ctx.bridgeIdp)).sub);
+  } catch (e) {
+    policy.recordFailure(ctx, peer);
+    const reason = e instanceof Error ? e.message : String(e);
+    console.error(`auth-service: refused a manager instance list: ${reason}`);
+    if (peerThrottled) return send(res, 429, { error: "too many refused exchanges - wait a minute and retry" });
+    return send(res, 401, { error: reason });
+  }
+  try {
+    return send(res, 200, await ctx.listManagerInstances(owner));
+  } catch (e) {
+    // The proof was good and the gate read was not: unavailable, never an empty list.
+    return send(res, 503, { error: `the manager instance list is unavailable: ${e instanceof Error ? e.message : String(e)}` });
+  }
+}
+
 /** What {@link handleManagerServiceAuthority} reads. Exported so a host that serves the route with a
  *  context it builds itself is held by the compiler to every arm the dispatcher calls. `failures`
  *  and `badCaps` are the face's refusal windows, shared with its `/exchange` so neither route is a
@@ -2989,6 +3102,38 @@ export async function handleManagerServiceAuthority(req: IncomingMessage, res: S
     if (peerThrottled)
       return send(res, 429, { error: "too many refused exchanges - wait a minute and retry" });
     return send(res, 403, { error: reason });
+  }
+}
+
+/** Minimal host-held inputs for the proof decision; no signing or storage authority is used. */
+export type ToolResultHumanProofCtx = Pick<HandlerCtx, "cap" | "bridgeIdp" | "ownerSecret" | "badCaps">;
+
+/** Decide one signed password proof against the host's authenticated session subject.
+ * The subject is an equality constraint, never the source of the derived owner. */
+export async function handleToolResultHumanProof(
+  req: IncomingMessage, res: ServerResponse, ctx: ToolResultHumanProofCtx,
+): Promise<void> {
+  if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+  if (req.headers.origin !== undefined) return send(res, 403, { error: "browser-origin requests are not served here" });
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? ""))
+    return send(res, 415, { error: "content-type must be application/json" });
+  if (req.headers.authorization !== `Bearer ${ctx.cap}`)
+    return refuseCapability(res, ctx, "missing/invalid exchange capability - human proof verification is a loopback host action");
+  let body: unknown;
+  try { body = await readJsonBody(req); }
+  catch (error) { return send(res, error instanceof RequestBodyError ? error.status : 400, { error: "invalid human proof request" }); }
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some(key => key !== "idpToken" && key !== "subject") ||
+      !("idpToken" in body) || typeof body.idpToken !== "string" || !body.idpToken ||
+      !("subject" in body) || typeof body.subject !== "string" || !body.subject)
+    return send(res, 400, { error: "human proof verification needs only { idpToken, subject }" });
+  try {
+    const proof = await verifyToolResultHumanProof(body.idpToken, ctx.bridgeIdp);
+    if (proof.sub !== body.subject) return send(res, 403, { error: "human proof subject does not match the session" });
+    const owner = deriveOwnerForIdpSubject(ctx.ownerSecret, ctx.bridgeIdp.issuer, proof.sub);
+    return send(res, 200, { authorized: true, owner, ...proof });
+  } catch {
+    return send(res, 403, { error: "fresh signed password proof required" });
   }
 }
 
@@ -3108,6 +3253,7 @@ function makePublicHandler(
     ],
     ["/exchange", (req, res, c) => handleExchange(req, res, c, policy)],
     ["/manager-service-authority", (req, res, c) => handleManagerServiceAuthority(req, res, c, policy)],
+    ["/manager-instances", (req, res, c) => handleManagerInstances(req, res, c, policy)],
     [
       "/.well-known/cotal-mesh",
       (req, res) => {
@@ -3136,7 +3282,7 @@ function makePublicHandler(
     void (async () => {
       try {
         const route = routes.get(req.url ?? "");
-        if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /.well-known/cotal-mesh" });
+        if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-instances, /.well-known/cotal-mesh" });
         await route(req, res, ctx);
       } catch (e) {
         if (!res.headersSent) sendRequestError(res, e);

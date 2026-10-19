@@ -6,7 +6,6 @@ import { activityAge, c, presenceDetail, statusBadge } from "../ui.js";
 export async function endpoints(args: ParsedArgs): Promise<void> {
   const { ep, space } = await openTransient(args.values as ConnectValues, "endpoints");
   try {
-    await ep.waitForPresenceSnapshot();
     printEndpoints(ep.getRoster(), space);
   } finally {
     await ep.stop();

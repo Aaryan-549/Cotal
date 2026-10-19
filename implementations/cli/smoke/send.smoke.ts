@@ -8,6 +8,11 @@
  * inherited COTAL_* is stripped. COTAL_SKIP_CONNECTOR_SEED is a reconcile skip, not a store fence;
  * the seed store follows XDG_CONFIG_HOME (via globalConfigDir()), not COTAL_HOME.
  *
+ * Leak check (#4091): each one-shot send reads presence and the channel registry once, with no watch
+ * consumer, so the consumer count on both buckets is the same before and after the sends. The old
+ * watch left one consumer per send on each bucket for five minutes. `cotal channels list` on the same
+ * operator credential reads the registry with a Direct Get and leaves no consumer either.
+ *
  * Run: pnpm smoke:send
  */
 import { execFile, spawn } from "node:child_process";
@@ -16,7 +21,10 @@ import { hostname, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { connect, credsAuthenticator } from "@nats-io/transport-node";
+import { jetstreamManager } from "@nats-io/jetstream";
 import {
+  channelBucket,
   CotalEndpoint,
   createSpaceAuth,
   DEV_OWNER,
@@ -25,6 +33,7 @@ import {
   mintCreds,
   mintLifecycleUid,
   newIdentity,
+  presenceBucket,
   principalKey,
   provisionAgent,
   seedChannelRegistry,
@@ -38,7 +47,7 @@ import { authDir, recordMesh, saveSpaceAuth, setCurrent } from "@cotal-ai/worksp
 import { pickFreePort } from "../../../packages/core/smoke/_free-port.js";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const EXPECTED = 36;
+const EXPECTED = 40;
 let pass = 0;
 let fail = 0;
 const check = (name: string, cond: boolean, extra?: unknown) => {
@@ -178,6 +187,20 @@ try {
   await bob.start();
   await wait(800);
 
+  // The consumer count on the presence and channel-registry streams, read from the broker.
+  const inspectorId = newIdentity();
+  const inspector = await connect({
+    servers,
+    authenticator: credsAuthenticator(new TextEncoder().encode(await mintCreds(auth, inspectorId, "admin"))),
+    inboxPrefix: `_INBOX_${inspectorId.id}`,
+  });
+  const inspectorJsm = await jetstreamManager(inspector);
+  const watchConsumers = async (): Promise<{ presence: number; channels: number }> => ({
+    presence: (await inspectorJsm.streams.info(`KV_${presenceBucket(space)}`)).state.consumer_count,
+    channels: (await inspectorJsm.streams.info(`KV_${channelBucket(space)}`)).state.consumer_count,
+  });
+  const consumersBefore = await watchConsumers();
+
   const dmText = `outside-u-${randomUUID().slice(0, 6)}`;
   const msgText = `outside-m-${randomUUID().slice(0, 6)}`;
   const askText = `outside-a-${randomUUID().slice(0, 6)}`;
@@ -185,6 +208,27 @@ try {
   const msg = await run(["send", "msg", "general", msgText]);
   const ask = await run(["send", "ask", "reviewer", askText]);
   await wait(700);
+  const consumersAfter = await watchConsumers();
+  const listed = await run(["channels", "list"]);
+  const consumersAfterList = await watchConsumers();
+  await inspector.close();
+
+  check(
+    "the consumer count reads bob's own presence and channel-registry watches",
+    consumersBefore.presence >= 1 && consumersBefore.channels >= 1,
+    consumersBefore,
+  );
+  check(
+    "three one-shot sends leave no consumer on the presence or channel-registry stream (#4091)",
+    consumersAfter.presence === consumersBefore.presence && consumersAfter.channels === consumersBefore.channels,
+    { before: consumersBefore, after: consumersAfter },
+  );
+  check("`cotal channels list` exits 0 and lists the seeded #general", listed.code === 0 && listed.stdout.includes("#general"), listed);
+  check(
+    "`cotal channels list` leaves no consumer on the channel-registry stream (#4091)",
+    consumersAfterList.channels === consumersAfter.channels,
+    { before: consumersAfter, after: consumersAfterList },
+  );
 
   check("`cotal send dm` outside a seat exits 0", dm.code === 0, dm.stderr);
   check("`cotal send msg` outside a seat exits 0", msg.code === 0, msg.stderr);

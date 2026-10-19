@@ -65,6 +65,9 @@ The manager's `resolve-cwd` command is in the `manager.spawn` capability class. 
 absolute path on that manager's host and returns its canonical directory plus the host name. It
 refuses a relative, missing or non-directory path with `failed-precondition`; it creates nothing.
 `spawn` applies the same check at admission, before any credentials or durables are minted.
+A runtime that delegates seats outside the manager's host cannot use a host cwd. Its manager
+refuses `resolve-cwd` with `failed-precondition` before any filesystem lookup, with the same
+execution-mode refusal for every path. It returns no host name or canonical path.
 
 The manager's `resolve-agent` command is minted beside `spawn` in the spawn capability and the
 operator instruments. It accepts the persona fields `spawn` takes (`name`, `config`, `agent`,
@@ -163,7 +166,10 @@ submitted it, so another caller's spawn under the same id is its own goal with i
 acceptance. A sibling instance or a restarted one
 answers it from the identity the accepting instance recorded before it replied, owner included.
 When that record names no owner because an older manager wrote it, the resubmission is refused
-`unavailable`.
+`unavailable`. Once the goal has ended, the accepting manager keeps its acceptance for five more
+minutes. After that, and at any other instance, the resubmission is answered from the goal's
+terminal and never accepted again: a `succeeded` terminal names the agent, so it returns the same
+acceptance, and any other outcome refuses it `failed-precondition` with that terminal attached.
 
 The name is the one actually allocated: a persona-derived collision is auto-numbered
 (`reviewer`, then `reviewer_2`), while a hard-pinned `--name` that collides with a live
@@ -225,10 +231,15 @@ the whole id, because both surfaces take nothing else.
 On a user-auth mesh, manager commands obtain a short-lived `manager-caller` view from the
 exchange. It authorizes one concrete manager instance using the caller's current actor grant and
 the host's registered service records. Discovery and invocation both use that instance's `inst`
-route. This view grants no registry scan, class queue, or additional command capability. An absent,
+route. This view grants no registry scan or class queue. It adds no command capability except the
+three reads a launch needs: a view whose actor holds `spawn` may call `status`, `models` and
+`resolve-cwd` on that instance, subject to the execution-mode limit above. A `run`-only or no-scope view may not, and `ps` and `slots` stay with
+`admin`. A user mesh's co-located manager answers every owner's view, so its `status` counts only the
+caller's own seats, as `ps` would list them, unless the caller holds `admin`. An absent,
 ambiguous or unauthorized selection refuses before the command is sent. An ambiguous one lists the
 owner's live manager instance ids and names the caller's way to pick one: `--on <instanceId>` for
-the CLI, the `instance` argument for an agent's tools.
+the CLI, `--manager-instance <instanceId>` for `cotal agent-bearer --manager-call`, and the
+`instance` argument for an agent's tools.
 
 Managed launches carry `COTAL_MANAGER_INSTANCE` so their tools address the manager that launched
 them; a tool's `instance` argument must name that same manager. The `cotal` commands run from their

@@ -28,7 +28,7 @@ import { join, resolve } from "node:path";
 import { renderDetachedSummary } from "../../implementations/cli/src/lib/up-report.js";
 import { assertSmokeSandboxDown, freePort, recordSmokeSandbox } from "@cotal-ai/smoke-kit";
 import { DEFAULT_SPACE } from "@cotal-ai/core";
-import { canonicalLocalProcessPath, DELIVERY_PIDFILE, MANAGER_DELIVERY_AWARE_MARKER, MANAGER_LOGFILE, MANAGER_PIDFILE, MANAGER_SPARE_CAPABILITY } from "@cotal-ai/workspace";
+import { canonicalLocalProcessPath, deliveryCredsKey, DELIVERY_PIDFILE, MANAGER_DELIVERY_AWARE_MARKER, MANAGER_LOGFILE, MANAGER_PIDFILE, MANAGER_SPARE_CAPABILITY, workspaceSecretStore } from "@cotal-ai/workspace";
 
 // Ephemeral OS-assigned port: no fixed-port collision across back-to-back / concurrent runs.
 const PORT = await freePort();
@@ -175,21 +175,29 @@ try {
   //     daemon's, and report a healthy control plane over a child that was already dead.
   //     A LIVE holder rather than a SIGKILLed one's expiring record: the same code path, with no
   //     dependence on how much of the bucket TTL is left by the time the refresh reaches its CAS.
+  //     The folder's delivery credential goes too. While it is on disk, the refresh recognises the
+  //     row as held by this folder's previous daemon and waits it out instead of launching (#4092,
+  //     covered by smoke:up-crash-repair-lease:live), so this cell would never reach the launch.
   const deliveryPidFile = record(DELIVERY_PIDFILE);
   const liveDelivery = readFileSync(deliveryPidFile, "utf8");
   const deliveryIdentityFile = `${deliveryPidFile}.identity`;
   const liveDeliveryIdentity = readFileSync(deliveryIdentityFile, "utf8");
+  const secrets = workspaceSecretStore(root);
+  const credsKey = deliveryCredsKey(DEFAULT_SPACE, { injected: false, root });
+  const liveDeliveryCreds = (await secrets.get(credsKey))!;
   rmSync(deliveryPidFile);
   rmSync(deliveryIdentityFile);
+  await secrets.delete(credsKey);
   const lost = cli("up", "--server", SERVER);
   const lostOut = plain(lost.stdout + lost.stderr);
   ok("a refresh whose delivery launch loses the single-flight lease exits non-zero", lost.status !== 0, lostOut);
   ok("the refresh says the daemon it started exited without becoming ready", /exited without becoming ready/.test(lostOut), lostOut);
   ok("the daemon that HOLDS the lease is left running", alive(Number(liveDelivery.trim())), liveDelivery);
-  // The losing launch overwrote the record with its own (dead) pid; put back the one `down` needs to
-  // stop the daemon that is actually serving.
+  // The losing launch overwrote the record and the credential with its own; put back the ones that
+  // belong to the daemon that is actually serving, which `down` needs to stop it.
   writeFileSync(deliveryPidFile, liveDelivery);
   writeFileSync(deliveryIdentityFile, liveDeliveryIdentity);
+  await secrets.put(credsKey, liveDeliveryCreds);
 
   // 2c) #1417: a refresh under --no-manager of a space whose manager is LIVE refuses rather than
   //     silently keeping or stopping it, naming the exact `cotal down manager` remedy the same way

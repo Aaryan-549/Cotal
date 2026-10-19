@@ -3,6 +3,7 @@ import { existsSync, openSync, closeSync, writeFileSync, readFileSync } from "no
 import {
   DEFAULT_SERVER,
   LEASE_TTL_MS,
+  awaitDeadDeliveryLease,
   mintCreds,
   newIdentity,
   waitForDeliveryLease,
@@ -12,7 +13,7 @@ import { DELIVERY_CREDS_KIND, DELIVERY_LOGFILE, DELIVERY_PIDFILE, authDir, canon
 import { selfArgv, displayCmd } from "./self-exec.js";
 import { resolveRuntimeSpace } from "./status.js";
 import { cotalRoot } from "./paths.js";
-import { ensureManager, managerHasDeliveryMarker, managerRecordState, stopManager } from "./manager-proc.js";
+import { clearManagerArtifacts, ensureManager, managerHasDeliveryMarker, managerRecordState, stopManager } from "./manager-proc.js";
 import { stopLocalProcess } from "./local-process-stop.js";
 import { RESPONDER_UNBOUND_CONSEQUENCE } from "./delivery-responder.js";
 
@@ -150,8 +151,8 @@ export async function stopOldHostingManagerIfPresent(
     // whose death it could not confirm). Letting that throw propagate is the point: the daemon must not
     // start beside a manager still bound to Plane 3. The stop is bound to the judged pid because a record
     // a successor published since names a process this verdict never judged; ensureDelivery's own
-    // verdict reads that record.
-    await stopManager(space, { pid: record.pid });
+    // verdict reads that record, and the artifacts beside it are that successor's.
+    if (await stopManager(space, { pid: record.pid })) clearManagerArtifacts(space);
   }
 }
 
@@ -248,13 +249,41 @@ export async function ensureDelivery(
     );
   let launched: number | undefined;
   if (delivery.state !== "alive") {
+    const credsKey = deliveryCredsKey(space, { injected: false, root: findCotalRoot() });
+    // #4092: no daemon is recorded alive here, but the one before it may still hold shard 0. A daemon
+    // that was SIGKILLed, or that exited because its broker went away, cannot release its row, and a
+    // replacement started inside the remaining TTL loses the create and refuses to bind. The row
+    // names the previous daemon by the credential this folder handed it, which is still on disk until
+    // the put below replaces it. When the row names that credential, the holder is this folder's dead
+    // daemon, so wait for the bucket TTL to remove the row rather than start a daemon that will lose.
+    // A row written again during the wait has a live holder, and that is refused.
+    const previous = await credsStore().get(credsKey);
+    if (previous !== undefined) {
+      const recorded = delivery.pid !== undefined ? ` (pid ${delivery.pid})` : "";
+      const waited = await awaitDeadDeliveryLease({
+        servers: server,
+        space,
+        creds,
+        tls: o.tls === true,
+        deadHolder: deliveryLeaseHolderFor(previous),
+        ttlMs: LEASE_TTL_MS,
+        onWait: (ms) =>
+          console.error(`• delivery: shard 0 is still leased to this folder's previous delivery daemon${recorded}, which is not running; waiting ${Math.ceil(ms / 1000)}s for the lease to expire`),
+      });
+      if (waited === "rewritten")
+        throw new Error(
+          `the shard-0 delivery lease for space "${space}" names this folder's previous delivery daemon, and it was written again while waiting for it to expire, so a live daemon holds it.\n` +
+            `Refusing to start a second daemon: two daemons on one shard split its durables.\n` +
+            `NEXT: find the process running \`cotal deliver --space ${space}\` and stop it or keep it; \`cotal down\` does not reach a daemon this folder has no record of.`,
+        );
+    }
     // The store's put hardens `.cotal/` first (the cred is born under a private ACL, no race) and
     // lands it atomically — same path and bytes as before the seam.
     // Through the per-kind RESOLVER (not `segmentedKey`): this is the absent-means-mint writer for
     // the kind, so on a root whose cred is still flat the material must move here, before the put —
     // otherwise the daemon that is about to start reads the canonical location, finds nothing, and
     // this write lands a SECOND live delivery cred beside the one the flat file still holds.
-    await credsStore().put(deliveryCredsKey(space, { injected: false, root: findCotalRoot() }), creds);
+    await credsStore().put(credsKey, creds);
     launched = startDeliveryDetached({ ...o, space, server });
   }
   // ALWAYS wait for the daemon to be READY (lease flipped ready AFTER it bound ctl.delivery) before

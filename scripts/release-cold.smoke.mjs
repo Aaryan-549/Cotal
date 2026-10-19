@@ -32,6 +32,46 @@ check("snapshot publication reuses qualified versions", () => {
   assert(steps.some((step) => step.run?.includes("apply-cold-versions.mjs")));
   assert(!steps.some((step) => step.run?.includes("changeset version")));
 });
+const actionStep = (job) => {
+  const steps = release.jobs[job].steps.filter((step) => step.uses?.startsWith("changesets/action@"));
+  assert.equal(steps.length, 1, `${job} runs changesets/action exactly once`);
+  return steps[0];
+};
+const statusFunction = /\b(always|cancelled|failure|success)\s*\(/;
+check("version-only admission cannot publish", () => {
+  const job = release.jobs["version-pr"];
+  const step = actionStep("version-pr");
+  assert.equal(step.id, "changesets");
+  assert.equal(step.with.publish, undefined);
+  assert.equal(step.with.version, "pnpm ci:version");
+  assert.equal(step.env.COLD_CANDIDATE, undefined);
+  assert.equal(job.permissions["id-token"], undefined);
+  assert.equal(job.environment, "npm-publish");
+  assert.equal(job.needs, undefined);
+  assert.equal(job.outputs["has-changesets"], "${{ steps.changesets.outputs.hasChangesets }}");
+  const steps = job.steps.map((step) => step.name);
+  const definite = job.steps.find((step) => step.name === "Require a definite changeset state");
+  assert(steps.indexOf("Require a definite changeset state") > steps.indexOf(step.name));
+  assert.equal(definite.run, 'test "$HAS_CHANGESETS" = true || test "$HAS_CHANGESETS" = false');
+});
+check("only an explicit no-changesets admission starts the normal cold matrix", () => {
+  const cold = release.jobs["cold-setup"];
+  assert.deepEqual(cold.needs, ["version-pr"]);
+  assert.equal(cold.if, "(github.event_name == 'workflow_dispatch' && inputs.snapshot != '') || needs.version-pr.outputs.has-changesets == 'false'");
+  assert(!statusFunction.test(cold.if));
+});
+check("publication needs a definite no-changesets admission and a successful cold matrix", () => {
+  const job = release.jobs.version;
+  assert.deepEqual(job.needs, ["version-pr", "cold-setup"]);
+  assert.equal(job.if, "needs.version-pr.outputs.has-changesets == 'false'");
+  assert(!statusFunction.test(job.if));
+  assert.equal(job.environment, "npm-publish");
+  assert.equal(job.permissions["id-token"], "write");
+  const step = actionStep("version");
+  assert.equal(step.with.publish, "pnpm ci:publish");
+  assert.equal(step.env.COLD_CANDIDATE, "${{ runner.temp }}/cold-candidate");
+  assert.equal(step.env.COLD_RESULTS, "${{ runner.temp }}/cold-results");
+});
 const source = "a".repeat(40);
 const candidateBytes = JSON.stringify({ source, syntheticVerifierFixture: true });
 const candidateSha256 = createHash("sha256").update(candidateBytes).digest("hex");
