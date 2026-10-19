@@ -183,6 +183,9 @@ export const upFlags: FlagSpec[] = [
   { name: "space", type: "string", value: "<s>", description: "space name (default: the folder's)" },
   { name: "store-dir", type: "string", value: "<dir>", description: "JetStream store directory" },
   { name: "max-file-store", type: "string", value: "<bytes>", description: "JetStream file storage cap in bytes (default: nats-server's dynamic cap). Fixed at broker start; recorded and kept across `down --preserve-state`" },
+  { name: "log-file", type: "string", value: "<path>", description: "nats-server log file path (log_file)" },
+  { name: "logfile-size-limit", type: "string", value: "<bytes>", description: "nats-server log rotation size limit in bytes (logfile_size_limit)" },
+  { name: "logfile-max-num", type: "string", value: "<n>", description: "maximum number of rotated nats-server log backup files (logfile_max_num)" },
   { name: "channels", type: "string", value: "<path>", description: "channel-registry seed file (JSON; default .cotal/channels.json)" },
   { name: "tls-cert", type: "string", value: "<file>", description: "serve the broker over TLS with this certificate (requires --tls-key)" },
   { name: "tls-key", type: "string", value: "<file>", description: "the private key for --tls-cert" },
@@ -239,7 +242,9 @@ export async function up(args: ParsedArgs, inheritedLock?: MaintenanceLock): Pro
 
 async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?: () => void): Promise<void> {
   const values = args.values as {
-    server?: string; "store-dir"?: string; "max-file-store"?: string; space?: string; open?: boolean; "user-auth"?: boolean; idp?: string;
+    server?: string; "store-dir"?: string; "max-file-store"?: string;
+    "log-file"?: string; "logfile-size-limit"?: string; "logfile-max-num"?: string;
+    space?: string; open?: boolean; "user-auth"?: boolean; idp?: string;
     "exchange-public-port"?: string; "exchange-public-url"?: string; "exchange-trusted-proxy"?: boolean; "advertised-server"?: string; "agent-provisioning-url"?: string;
     channels?: string; detach?: boolean; host?: string; runtime?: string; file?: string; "dry-run"?: boolean;
     restore?: string; "restore-only"?: string; "accept-missing-source"?: boolean; "rotate-sys"?: boolean;
@@ -567,6 +572,11 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
   const publicExchange = publicExchangeArgs(values, wantUser);
   const maxSessions = parsePositiveIntegerFlag("--max-sessions", values["max-sessions"]);
   const maxFileStore = parsePositiveIntegerFlag("--max-file-store", values["max-file-store"]);
+  if (values["log-file"] !== undefined && (!values["log-file"].trim() || /[\0\r\n]/.test(values["log-file"])))
+    throw new Error("--log-file must be a non-empty file path");
+  const logFile = values["log-file"] !== undefined ? resolve(values["log-file"]) : undefined;
+  const logfileSizeLimit = parsePositiveIntegerFlag("--logfile-size-limit", values["logfile-size-limit"]);
+  const logfileMaxNum = parsePositiveIntegerFlag("--logfile-max-num", values["logfile-max-num"]);
   // The manifest path renders its broker from the manifest, which has no store fields, so the flag
   // would be accepted and never rendered. Refuse it rather than drop it.
   if (maxFileStore !== undefined && values.file)
@@ -659,6 +669,9 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
         rotateSys: values["rotate-sys"],
         maxSessions,
         noManager,
+        logFile,
+        logfileSizeLimit,
+        logfileMaxNum,
       });
       return;
     }
@@ -678,6 +691,9 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
         rotateSys: values["rotate-sys"],
         maxSessions,
         noManager,
+        logFile,
+        logfileSizeLimit,
+        logfileMaxNum,
       });
     } finally {
       releaseMaintenanceLock(lock);
@@ -1117,6 +1133,9 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
       server,
       storeDir: values["store-dir"],
       maxFileStore,
+      logFile,
+      logfileSizeLimit,
+      logfileMaxNum,
       space: values.space,
       open: values.open,
       userAuth: wantUser ? { idpUrl: values.idp } : undefined,
@@ -1170,18 +1189,26 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
       throw new Error(`resume store ${storeDir} no longer matches the preserved source identity; refusing to open JetStream over it`);
   }
   mkdirSync(storeDir, { recursive: true });
+  if (logFile) mkdirSync(dirname(logFile), { recursive: true });
   await claimSpace(space, server, cotalRoot());
   const seedFile = loadChannelsFile(values.channels);
   // Decided above the branch; the dial host is only settled here (a port collision may have moved
   // the server, and the hostname is what the certificate has to match).
   assertServesDialHost(transport, new URL(server).hostname);
-  const setup = useAuth ? await authSetup(storeDir, server, space, host, wantUser ? { idpUrl: values.idp } : undefined, transport, values["rotate-sys"], maxFileStore) : undefined;
+  const logOpts = logFile !== undefined || logfileSizeLimit !== undefined || logfileMaxNum !== undefined
+    ? { logFile, logfileSizeLimit, logfileMaxNum }
+    : undefined;
+  const setup = useAuth ? await authSetup(storeDir, server, space, host, wantUser ? { idpUrl: values.idp } : undefined, transport, values["rotate-sys"], maxFileStore, logOpts) : undefined;
   const port = Number(new URL(server).port) || 4222;
   // Both modes go through a RENDERER, never bare CLI flags. Open mode used to start from
   // `-js -sd … -p … -a …`, which never called a renderer at all — so the required transport union
   // protected the auth path and was silent on the open one, and a cert/key pair passed to an
   // open-mode `up` would have been accepted while the listener came up in cleartext.
-  const confPath = setup ? setup.confPath : writeOpenBrokerConf(storeDir, { port, host, transport, maxFileStore });
+  const confPath = setup
+    ? setup.confPath
+    : logOpts
+      ? writeOpenBrokerConf(storeDir, { port, host, transport, maxFileStore, ...logOpts })
+      : writeOpenBrokerConf(storeDir, { port, host, transport, maxFileStore });
   const natsArgs = [
     "-c", confPath,
     ...(boundListener ? ["--name", boundListener.serverName] : []),
@@ -2164,7 +2191,7 @@ async function upManifest(file: string, opts: UpManifestFlags): Promise<void> {
   try {
     // `m.broker?.host`, not the defaulted `host`: same reason as the flag path — only a host the
     // manifest actually declared is an exposure decision worth persisting.
-    ({ pid, controlPlane, authService } = await startMeshDetached({ transport: opts.transport, server, space: m.space, open, userAuth, rotateSys: opts.rotateSys, host: m.broker?.host, seed: manifestToChannels(eff), runtime, launch: specPath, maxSessions: opts.maxSessions, noManager: effectiveNoManager }));
+    ({ pid, controlPlane, authService } = await startMeshDetached({ transport: opts.transport, server, space: m.space, open, userAuth, rotateSys: opts.rotateSys, host: m.broker?.host, logFile: m.broker?.logFile, logfileSizeLimit: m.broker?.logfileSizeLimit, logfileMaxNum: m.broker?.logfileMaxNum, seed: manifestToChannels(eff), runtime, launch: specPath, maxSessions: opts.maxSessions, noManager: effectiveNoManager }));
   } catch (e) {
     console.error(c.red(`✗ ${(e as Error).message}`));
     process.exit(1);
@@ -2217,6 +2244,9 @@ interface UpManifestFlags {
   rotateSys?: boolean;
   /** Operator-set live-session ceiling, recorded and handed to the manager started with the mesh. */
   maxSessions?: number;
+  logFile?: string;
+  logfileSizeLimit?: number;
+  logfileMaxNum?: number;
   /** #1417 broker-only boot: the broker (+ channels, + delivery daemon in auth mode) comes up and
    *  NO manager starts on this host. The manifest's agents are booted BY its manager, so a manifest
    *  declaring agents under `--no-manager` is a contradiction refused before anything boots. */
@@ -2232,6 +2262,9 @@ function applyUpOverrides(prepared: PreparedManifest, o: UpManifestFlags): Prepa
   if (o.host) broker.host = o.host;
   if (o.open) broker.auth = false;
   if (o.idp) broker.idp = o.idp;
+  if (o.logFile !== undefined) broker.logFile = o.logFile;
+  if (o.logfileSizeLimit !== undefined) broker.logfileSizeLimit = o.logfileSizeLimit;
+  if (o.logfileMaxNum !== undefined) broker.logfileMaxNum = o.logfileMaxNum;
   return {
     ...prepared,
     manifest: {
@@ -2485,6 +2518,12 @@ export interface DetachOpts {
   storeDir?: string;
   /** JetStream file storage cap in bytes (`--max-file-store`), rendered and recorded by this boot. */
   maxFileStore?: number;
+  /** Broker log file path (`--log-file`). Defaults to `.cotal/nats.log` when log rotation is enabled. */
+  logFile?: string;
+  /** Broker log rotation threshold in bytes (`--logfile-size-limit`). */
+  logfileSizeLimit?: number;
+  /** Maximum number of rotated broker log backup files (`--logfile-max-num`). */
+  logfileMaxNum?: number;
   space?: string;
   open?: boolean;
   /** USER MODE: enable per-user auth (presence = on; `idpUrl` pins the IdP on first enable). */
@@ -2556,23 +2595,39 @@ export async function startMeshDetached(
   // effective server is finally known — a manifest may name a different host than the flags did, and
   // a certificate that is valid for one is not thereby valid for the other.
   const transport = assertServesDialHost(opts.transport, new URL(server).hostname);
-  const setup = useAuth ? await authSetup(storeDir, server, space, host, opts.userAuth, transport, opts.rotateSys, opts.maxFileStore) : undefined;
+  const hasNativeLog = opts.logFile !== undefined || opts.logfileSizeLimit !== undefined || opts.logfileMaxNum !== undefined;
+  const logPath = opts.logFile ? resolve(opts.logFile) : cotalPath("nats.log");
+  if (hasNativeLog) mkdirSync(dirname(logPath), { recursive: true });
+  const logOpts = hasNativeLog
+    ? { logFile: logPath, logfileSizeLimit: opts.logfileSizeLimit, logfileMaxNum: opts.logfileMaxNum }
+    : undefined;
+  const setup = useAuth ? await authSetup(storeDir, server, space, host, opts.userAuth, transport, opts.rotateSys, opts.maxFileStore, logOpts) : undefined;
   const port = Number(new URL(server).port) || 4222;
   // Same rule as the foreground path: every route to a listener names its transport (see
   // `writeOpenBrokerConf`). Detach must not be the mode where the fence quietly does not apply.
-  const confPath = setup ? setup.confPath : writeOpenBrokerConf(storeDir, { port, host, transport, maxFileStore: opts.maxFileStore });
+  const confPath = setup
+    ? setup.confPath
+    : logOpts
+      ? writeOpenBrokerConf(storeDir, { port, host, transport, maxFileStore: opts.maxFileStore, ...logOpts })
+      : writeOpenBrokerConf(storeDir, { port, host, transport, maxFileStore: opts.maxFileStore });
   const args = [
     "-c", confPath,
     ...(opts.boundListener ? ["--name", opts.boundListener.serverName] : []),
   ];
   const { bin, source } = await resolveNatsServer();
 
-  const logPath = cotalPath("nats.log");
   const startOffset = existsSync(logPath) ? statSync(logPath).size : 0;
-  const fd = openSync(logPath, "a");
-  const listenerStartedAt = new Date().toISOString();
-  const child = spawn(bin, args, { detached: true, stdio: ["ignore", fd, fd] });
-  closeSync(fd);
+  let child: ChildProcess;
+  let listenerStartedAt: string;
+  if (hasNativeLog) {
+    listenerStartedAt = new Date().toISOString();
+    child = spawn(bin, args, { detached: true, stdio: "ignore" });
+  } else {
+    const fd = openSync(logPath, "a");
+    listenerStartedAt = new Date().toISOString();
+    child = spawn(bin, args, { detached: true, stdio: ["ignore", fd, fd] });
+    closeSync(fd);
+  }
   await recordSpawnedListener(child, listenerStartedAt, opts.boundListener);
   child.unref();
 
@@ -2804,6 +2859,7 @@ function tailLines(path: string, from: number, onLine: (l: string) => void, stop
     if (stopped()) return;
     try {
       const size = statSync(path).size;
+      if (size < offset) offset = 0;
       if (size > offset) {
         const fd = openSync(path, "r");
         const buf = Buffer.alloc(size - offset);
@@ -3215,11 +3271,31 @@ function validateRecorded(
  * mode through a renderer is what makes the union total: there is now no route to a listener that
  * does not state its transport.
  */
-function writeOpenBrokerConf(storeDir: string, opts: { port: number; host: string; transport: BrokerTransport; maxFileStore?: number }): string {
+function writeOpenBrokerConf(
+  storeDir: string,
+  opts: {
+    port: number;
+    host: string;
+    transport: BrokerTransport;
+    maxFileStore?: number;
+    logFile?: string;
+    logfileSizeLimit?: number;
+    logfileMaxNum?: number;
+  },
+): string {
   const confPath = resolve(storeDir, "..", "server-open.conf");
   writeFileSync(
     confPath,
-    openServerConfig({ port: opts.port, host: opts.host, storeDir, maxFileStore: opts.maxFileStore, transport: opts.transport }),
+    openServerConfig({
+      port: opts.port,
+      host: opts.host,
+      storeDir,
+      maxFileStore: opts.maxFileStore,
+      logFile: opts.logFile,
+      logfileSizeLimit: opts.logfileSizeLimit,
+      logfileMaxNum: opts.logfileMaxNum,
+      transport: opts.transport,
+    }),
   );
   return confPath;
 }
@@ -3253,6 +3329,7 @@ async function authSetup(
   transport: BrokerTransport,
   rotateSys = false,
   maxFileStore?: number,
+  logOpts?: { logFile?: string; logfileSizeLimit?: number; logfileMaxNum?: number },
 ): Promise<{ confPath: string; creds: string; wsPort: number; prepared?: AuthPrepared; stateDir?: string }> {
   const dir = authDir(cotalRoot()); // the broker config (server.conf) still lands under the FS auth dir
   const store = workspaceSecretStore(cotalRoot());
@@ -3363,7 +3440,7 @@ async function authSetup(
       : await resolveAuthProvider().preloadAccounts({ store, space: enabledSpace });
     extraAccounts.push(...accounts);
   }
-  writeFileSync(confPath, serverConfig(auth, spaces, { transport, port, storeDir, maxFileStore, host, wsPort, wsHost: host, extraAccounts }));
+  writeFileSync(confPath, serverConfig(auth, spaces, { transport, port, storeDir, maxFileStore, host, wsPort, wsHost: host, extraAccounts, ...logOpts }));
   // Ephemeral setup cred: used only to probe reachability, pre-create the space streams/buckets
   // (setupSpaceStreams) and seed the channel registry (seedChannelRegistry) — all within the
   // enumerated `provisioner` scope. No broad `manager` residual for the up path.
