@@ -46,7 +46,7 @@ export const AUTHORITY_CLIENT_TTL_SEC = 15 * 60;
  *    reads here only feed revision-pinned CASes, which a stale read LOSES — fail-closed).
  *  - `$KV` writes on EXACTLY the issuance keys: auth `gate.` / `cred.` / `bysrc.` (the gate CAS
  *    fence and the mint's rows), auth `natkey.` (the callout's create-only native-key issuance
- *    evidence) and records `lifecycle.` / `uid.` (the alias head and the space-global uid
+ *    evidence), auth `consent.*` (create-only consent issuance evidence) and records `lifecycle.` / `uid.` (the alias head and the space-global uid
  *    reservation). No `srcgate.`/`stage.`/`session.` writes: root issuance
  *    presents no handles and runs no takeover; barriers are NOT this credential's job.
  *
@@ -78,6 +78,7 @@ export function authorityWriterGrants(space: string, connId: string): { publish:
       `$KV.${epAuthBucket(space)}.cred.>`,
       `$KV.${epAuthBucket(space)}.bysrc.>`,
       `$KV.${epAuthBucket(space)}.natkey.>`,
+      `$KV.${epAuthBucket(space)}.consent.*`,
       `$KV.${recordsBucket(space)}.lifecycle.>`,
       `$KV.${recordsBucket(space)}.uid.>`,
     ],

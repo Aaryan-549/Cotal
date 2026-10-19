@@ -345,6 +345,25 @@ the verified subject, which must match the session. The door verifies proof only
 sign consent, issue credentials, register a service or serve private content. A host must still
 refuse platform keys and check current membership and lifecycle at consent admission.
 
+A host may opt into consent issuance with `startAuthService({ ..., toolResultConsents: { keyId,
+resolveAnchor } })`. Provision its Ed25519 nkey seed under `toolResultConsentKey(space)` in the
+injected private store as `{ ver: 1, keyId, seed }`. The resolver reads that space's current
+`consents` anchor with scope `tool-results`. Missing, corrupt, revoked or mismatched signing
+material refuses. Neither the private store nor the resolver belongs in a worker or client.
+
+The loopback-only `POST /tool-result-consent/issue` requires the current host capability and no
+Origin header. Its closed input is `{ id, idpToken, subject, accountPublicKey, holder, target,
+ttlMs }`. The host resolves those coordinates from its current authenticated membership and
+account assignment. `holder` carries `{ actor, lifecycleUid }`; `target` carries `{ owner,
+actor, lifecycleUid }`. Auth verifies the signed password proof and derives the owner itself,
+requires a current same-owner interactive holder and managed target, and caps the window at
+24 hours. It returns only `{ consent }`, after a create-only `consent.<id>` auth-store write.
+Duplicate ids refuse. A failed or lost acknowledgement returns no consent and never retries.
+The host must not label an unknown outcome completed or resubmit it automatically.
+
+This door is absent from the public face. Without the opt-in signer it answers unavailable.
+It installs no serving material, revocation store, caller view, capture or result reader.
+
 Public tool arguments and results remain withheld. Auth and host issuance, Manager material,
 connector capture and the browser caller must each be landed and qualified in the
 [design's owner order](design/private-tool-results.md#9-owner-order), then carried by a stock

@@ -433,8 +433,11 @@ try {
     const { fetchIdpJwt } = await import("@cotal-ai/auth");
     return fetchIdpJwt(base, idpSessionToken);
   })();
-  const { TOOL_RESULT_HUMAN_PROOF_PATH } = await import("@cotal-ai/auth");
+  const { TOOL_RESULT_HUMAN_PROOF_PATH, TOOL_RESULT_CONSENT_PATH } = await import("@cotal-ai/auth");
   const proofBody = { idpToken: idpJwt, subject: signup.response.user.id };
+  check("consent signing is absent on the public face", (await post(`${PUBLIC}${TOOL_RESULT_CONSENT_PATH}`, {})).status === 404);
+  check("consent signing requires host capability even without signer composition", (await post(`${LOOPBACK}${TOOL_RESULT_CONSENT_PATH}`, {})).status === 401);
+  check("consent signing without private signer composition is unavailable", (await post(`${LOOPBACK}${TOOL_RESULT_CONSENT_PATH}`, {}, { authorization: `Bearer ${info!.cap}` })).status === 503);
   check("human proof decision is absent on the public face", (await post(`${PUBLIC}${TOOL_RESULT_HUMAN_PROOF_PATH}`, proofBody)).status === 404);
   check("human proof decision on the daemon requires the host capability", (await post(`${LOOPBACK}${TOOL_RESULT_HUMAN_PROOF_PATH}`, proofBody)).status === 401);
   check("ordinary signed IdP proof without password provenance refuses consent on the real daemon",
