@@ -161,7 +161,7 @@ the subject-token sanitizer. Endpoint names still use the separate DNS-label gra
 
 | symbol | purpose |
 |---|---|
-| `createCalloutAuth`, `startAuthCallout` | the NATS auth-callout responder. |
+| `createCalloutAuth`, `startAuthCallout` | the NATS auth-callout responder. It requires an awaited `recordIssuance`, which must durably record each success's broker user key before the response; the authority plane's `recordIssuance` is the stock one. |
 | `createUserTokenIssuer`, `pinnedJwksResolver` | mint and verify the Cotal user bearer. |
 | `createIdpBridge` | exchange a verified IdP JWT for a Cotal bearer (see [the callout contract](identity-and-auth.md#the-idp-callout-contract)). |
 | `deriveOwnerToken`, `validateUserToken` | owner derivation; strict bearer validation. |

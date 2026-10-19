@@ -84,6 +84,7 @@ import { validateRetainedManagedAgent } from "./continuity.js";
 import { reconstructRemoteManagerServeGrant, remoteManagerServeGrantFromCluster, remoteManagerSurface, type ManagerCluster } from "./manager-contract.js";
 import { authorityBarrierGrants, authorityWriterGrants, openAuthorityClient, openSupervisedConnectReader, platformReadinessGrants, remoteManagerIssuerGrants, remoteManagerRegistrationProof, registrationExecutorGrants, servedRunRequestSubjects, type AuthorityClient } from "./authority-client.js";
 import { authorizeConnectCredential } from "./connect-reader.js";
+import { makeNativeIssuanceRecorder, pruneNativeIssuance, type NativeIssuanceRecorder } from "./native-issuance.js";
 import { ensureRootCredential } from "./root-credential.js";
 import { activateLifecycleAtUid, observeGate, openLifecycleRegistry, readLifecycleHeadForOperation, type LifecycleRegistry } from "./lifecycle-registry.js";
 import { openAuthLedgerScannerCandidate } from "./ledger-scanner.js";
@@ -189,6 +190,9 @@ const MANAGER_PIN_REMEDY: Record<ManagerCaller | "wire", string> = {
  *  ensure both exchange arms stamp `act.credentialId` from. */
 export interface AuthAuthorityPlane {
   authorizeConnect: (t: ValidatedUserToken) => Promise<void>;
+  /** The callout's required native-key issuance recorder (SPEC 13.1 `natkey.`): create-only, then
+   *  the same connect authority re-read before the minted JWT may leave. */
+  recordIssuance: NativeIssuanceRecorder;
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
   /** `caller` picks the remedy an ambiguity refusal names: `--on` for the human (CLI) arm,
    *  `cotal agent-bearer`'s `--manager-instance` for the agent arm, the wire field otherwise. */
@@ -425,6 +429,8 @@ export interface OpenAuthAuthorityPlaneOptions {
   localManager?: () => ManagerInstanceIdentity | undefined;
   /** Bounded trusted-host-only standing renewable credential TTL option for rehearsal (default 24h). */
   standingRenewableTtlSeconds?: number;
+  /** How often expired native-issuance evidence is removed after the boot pass (default 60 s). */
+  nativeIssuancePruneMs?: number;
 }
 
 /**
@@ -632,6 +638,37 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
   const authAdmin = await openAuthAdminListener({ onConnection, server, space, dataAccount, reg: barrierReg, retirement, barrierFlight: retirementFlights, instanceId: authServeInstanceId, epoch: authServeGrant.epoch, grant: authServeGrant, log });
   unwind.push(() => authAdmin.close());
   const fileArm = ledgerAuthorizeConnect(opts.dir);
+  // The callout's issuance evidence: create-only natkey row, then the connect authority re-read
+  // in the same stream before the minted JWT may leave.
+  const recordIssuance = makeNativeIssuanceRecorder(registry, async (t) => {
+    refuseIfFenced();
+    fileArm(t);
+    await authorizeConnectCredential(reader.current(), t, Date.now);
+  });
+  // Expired evidence goes at boot (a failure refuses the open) and then on the plane's own timer;
+  // a failed pass fences the plane like a scanner death, never a silently unbounded recorder.
+  const pruneMs = opts.nativeIssuancePruneMs ?? 60_000;
+  if (!Number.isSafeInteger(pruneMs) || pruneMs < 100 || pruneMs > 3_600_000)
+    throw new Error(`nativeIssuancePruneMs must be an integer between 100 and 3600000 (got ${pruneMs})`);
+  await pruneNativeIssuance(registry, Math.floor(Date.now() / 1000));
+  let pruneTimer: ReturnType<typeof setTimeout> | undefined;
+  let pruneFlight: Promise<void> = Promise.resolve();
+  const schedulePrune = (): void => {
+    if (closing || fatalReason !== undefined) return;
+    pruneTimer = setTimeout(() => {
+      pruneFlight = pruneNativeIssuance(registry, Math.floor(Date.now() / 1000)).then(schedulePrune, (e: unknown) => {
+        if (closing) return;
+        const copy = `native-issuance cleanup failed: ${e instanceof Error ? e.message : String(e)}`;
+        hold?.fence(copy);
+        fatalReason = fatalReason ?? copy;
+        fireFatal(copy);
+        log(`auth-plane: ${copy}`);
+      });
+    }, pruneMs);
+  };
+  const stopPrune = async (): Promise<void> => { clearTimeout(pruneTimer); await pruneFlight; };
+  unwind.push(async () => { closing = true; await stopPrune(); });
+  schedulePrune();
   const recordsJsm = await jetstreamManager(remoteIssuer.nc);
   const authKv = await new Kvm(remoteIssuer.nc).open(epAuthBucket(space));
   const managerIssuanceGate = (instanceId: string) => serveIssuanceGateKv(authKv, space, { endpoint: "manager", instanceId });
@@ -777,6 +814,10 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       refuseIfFenced();
       fileArm(t);
       await authorizeConnectCredential(reader.current(), t, Date.now);
+    },
+    recordIssuance: (i) => {
+      refuseIfFenced();
+      return recordIssuance(i);
     },
     mintConnectCredential: (args) => {
       refuseIfFenced();
@@ -1661,6 +1702,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       // act), then the barrier that wrote it. An unreachable release keeps the barrier alive
       // for a later close retry; successful scanner teardown is not run a second time.
       closing = true;
+      await stopPrune();
       const scannerFlight = closeScanners ??= (async () => {
         await authAdmin?.close();
         const results = await Promise.allSettled([reader.close(), recordsScanner.close(), scanner.close()]);
@@ -2104,6 +2146,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
       space,
       token: { key: issuer.localKeySet(), issuer: issuer.issuer },
       authorizeActor: plane.authorizeConnect,
+      recordIssuance: plane.recordIssuance,
       permissionsFor: calloutPermissions(ledgerAclResolver(dir), plane.authorizeManagerCaller, plane.verifySession, plane.issueUserCaller),
       log: (l) => console.error(l),
     });
