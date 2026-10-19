@@ -5,7 +5,8 @@ import { PermissionViolationError, type NatsConnection, type Subscription } from
 import { EpEnvelopeError, renderLifecycleBlocked, lifecycleBlockedFrom, unansweredRequest } from "./endpoint-envelope.js";
 import type { GoalResultFact, GoalRef } from "./endpoint-action.js";
 import type { EpAttributedReply } from "./endpoint-call.js";
-import { epGoalProgressGrantRow, type EpCaller } from "./endpoint-subjects.js";
+import { callerTokens, endpointToken, epGoalProgressGrantRow, type EpCaller } from "./endpoint-subjects.js";
+import { spacePrefix } from "./subjects.js";
 import { GOAL_FOLLOW_MARGIN_MS, dec } from "./endpoint-caller.js";
 
 export interface SubmitAndFollowGoalOptions {
@@ -22,6 +23,20 @@ export interface SubmitAndFollowGoalOptions {
    *  describe that drew no reply keeps its own error then. A stop, or the deadline otherwise, reports
    *  `not-executed`. */
   prepare?: (signal: AbortSignal, deadline: number) => Promise<void>;
+}
+
+/** Who published a per-goal progress event, read off its subject
+ *  `epe.<endpoint>.<instanceId>.<epoch>.goal.<cO>.<cA>.<cUid>.<goalId>.progress`. A serving instance
+ *  may publish only under its own instance and epoch, so the broker vouches for both tokens. Anything
+ *  that is not that exact shape for this caller is `undefined`. */
+function goalProgressOrigin(space: string, endpoint: string, caller: EpCaller, subject: string): { instanceId: string; epoch: string; goalId: string } | undefined {
+  const head = `${spacePrefix(space)}.epe.${endpointToken(endpoint)}.`;
+  if (!subject.startsWith(head)) return undefined;
+  const [instanceId, epoch, ...tail] = subject.slice(head.length).split(".");
+  const triple = callerTokens(caller);
+  if (tail.length !== 6 || tail[0] !== "goal" || tail[1] !== triple[0] || tail[2] !== triple[1] || tail[3] !== triple[2] || tail[5] !== "progress") return undefined;
+  if (!instanceId || !epoch || !tail[4]) return undefined;
+  return { instanceId, epoch, goalId: tail[4] };
 }
 
 /** How a host verifies a goal-result fact: the same closed shape checks and outcome digest check as
@@ -46,7 +61,12 @@ export async function submitAndFollowGoalWith(
   if (!Number.isSafeInteger(deadlineMs) || deadlineMs <= 0)
     throw new EpEnvelopeError("bad-request", "goal following requires a positive integer deadline", undefined, "not-executed");
   const acceptingCaller = { ...caller };
+  // Terminals by goal AND publisher: only the instance and epoch that accepted the goal settle it
+  // from live progress. A terminal from any other publisher settles nothing; the first terminal
+  // seen prompts one read of the goal's own record through the caller's `reconcile`.
   const terminals = new Map<string, { state: string; data?: unknown }>();
+  const terminalKey = (goalId: string, instanceId: string, epoch: string | number) => `${goalId}\0${instanceId}\0${epoch}`;
+  let terminalPromptedRead = false;
   const progressSubject = epGoalProgressGrantRow(space, endpoint, acceptingCaller);
   const work = new AbortController();
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -106,10 +126,14 @@ export async function submitAndFollowGoalWith(
       callback: (err, msg) => {
         if (completed || stopped || mine !== generation) return;
         if (err) { subError ??= err; wake?.(); return; }
+        const origin = goalProgressOrigin(space, endpoint, acceptingCaller, msg.subject);
+        if (!origin) return;
         let ev: { goalId?: unknown; phase?: unknown; state?: unknown; data?: unknown };
         try { ev = JSON.parse(dec.decode(msg.data)); } catch { return; }
-        if (ev?.phase === "terminal" && typeof ev.goalId === "string") {
-          terminals.set(ev.goalId, { state: String(ev.state), data: ev.data });
+        // The body must name the goal its subject names; a disagreeing event is garbled.
+        if (ev?.phase === "terminal" && ev.goalId === origin.goalId) {
+          terminals.set(terminalKey(origin.goalId, origin.instanceId, origin.epoch), { state: String(ev.state), data: ev.data });
+          if (!terminalPromptedRead) { terminalPromptedRead = true; needsReconcile = true; }
           wake?.();
         }
       },
@@ -180,6 +204,8 @@ export async function submitAndFollowGoalWith(
     const goalId = acceptance?.goalId;
     if (typeof goalId !== "string") return attributed;
     const acceptedFingerprint = typeof acceptance?.fingerprint === "string" ? acceptance.fingerprint : undefined;
+    const acceptedBy = attributed.responder;
+    const acceptedKey = terminalKey(goalId, acceptedBy.instanceId, acceptedBy.epoch);
     const readinessDeadlineMs = acceptance?.readinessDeadlineMs;
     const followDeadlineMs = typeof readinessDeadlineMs === "number"
       && Number.isSafeInteger(readinessDeadlineMs) && readinessDeadlineMs >= 0
@@ -203,7 +229,9 @@ export async function submitAndFollowGoalWith(
           const fact = await verifyFact(result.result, "goal-result reply", ref);
           if (acceptedFingerprint !== undefined && fact.fingerprint !== acceptedFingerprint)
             throw new EpEnvelopeError("internal", "goal result fingerprint does not match the accepted goal (SPEC 13.6)");
-          terminals.set(goalId, { state: fact.state, data: fact.data });
+          if (fact.committer !== undefined && fact.committer.instanceId !== acceptedBy.instanceId)
+            throw new EpEnvelopeError("internal", `goal result fact was committed by instance ${fact.committer.instanceId}, not ${acceptedBy.instanceId}, which accepted the goal; it cannot authorize this outcome (SPEC 13.6)`);
+          terminals.set(acceptedKey, { state: fact.state, data: fact.data });
         }
       } catch (err) {
         if (!completed && !stopped && Date.now() < deadline)
@@ -216,13 +244,13 @@ export async function submitAndFollowGoalWith(
     const current = opts?.currentNc?.();
     if (current && current !== activeNc && !stopped) replaceConnection(current);
     needsReconcile = true; // Also covers a terminal lost before the acceptance arrived.
-    while (!terminals.has(goalId) && !stopped && !observationError && !subError && Date.now() < deadline) {
+    while (!terminals.has(acceptedKey) && !stopped && !observationError && !subError && Date.now() < deadline) {
       if (!finalReadRequested && Date.now() >= reconcileAt) {
         finalReadRequested = true;
         needsReconcile = true;
       }
       if (needsReconcile && !reading) void reconcile();
-      if (terminals.has(goalId) || stopped || observationError || subError) break;
+      if (terminals.has(acceptedKey) || stopped || observationError || subError) break;
       await new Promise<void>((resolve) => {
         const until = finalReadRequested ? deadline : reconcileAt;
         const timer = setTimeout(() => { timers.delete(timer); wake = undefined; resolve(); }, Math.max(0, Math.min(until - Date.now(), 2_147_483_647)));
@@ -230,7 +258,7 @@ export async function submitAndFollowGoalWith(
         wake = () => { clearTimeout(timer); timers.delete(timer); wake = undefined; resolve(); };
       });
     }
-    const terminal = terminals.get(goalId);
+    const terminal = terminals.get(acceptedKey);
     const observationFailure = (code: "unavailable" | "permission-denied" | "deadline-exceeded", reason: string) => ({
       ...attributed,
       reply: { ...attributed.reply, ok: false as const, data: undefined, error: {

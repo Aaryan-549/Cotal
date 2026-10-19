@@ -11,7 +11,8 @@ import * as auth from "../../auth/dist/index.js";
 // Cells: the person's own instance list; a bearer for one instance refused for another; calls
 // answered only by the selected instance; an accepted spawn followed to its terminal and read back
 // with a verified goal-result fact, before and after a page reload, and never submitted again;
-// refused, unknown and unavailable outcomes kept distinct; the CSP enforced with no violation.
+// refused, unknown and unavailable outcomes kept distinct; another Manager's forged terminals for
+// the followed goal ignored; the CSP enforced with no violation.
 //
 // The browser is `COTAL_SMOKE_BROWSER`, or the first Chromium-family binary on PATH. There is no
 // substitute for a real browser here, so a host without one refuses.
@@ -30,7 +31,9 @@ async function main() {
   const { fileURLToPath } = await import("node:url");
   const { build } = await import("esbuild");
   const { SignJWT, generateKeyPair, exportJWK } = createRequire(new URL("../../auth/package.json", import.meta.url))("jose") as any;
-  const { mintLifecycleUid, mintCreds, newIdentity, setupSpaceStreams, registry } = core;
+  const { mintLifecycleUid, mintCreds, newIdentity, setupSpaceStreams, registry, epeSubject, goalProgressTopic, epGoalProgressGrantRow, standaloneConnectOpts } = core;
+  const { connect } = await import("@nats-io/transport-node");
+  const { credsAuthenticator } = await import("@nats-io/nats-core");
   const { generateBrowserContracts } = await import("../../../packages/core/dist/browser-validators-build.js");
   const { startAuthService, grantActor, loadOwnerSecret, deriveOwnerForIdpSubject } = auth;
   const { startHostedAuthFixture } = await import("../../auth/smoke/_hosted-auth-fixture.js");
@@ -40,8 +43,9 @@ async function main() {
   await import("../../runtime/dist/index.js");
   const { emitSentinel, killAndAwaitExit } = await import("@cotal-ai/smoke-kit");
 
+  const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   // Every cell runs and is counted; a red cell does not hide the ones after it.
-  const EXPECTED = 24;
+  const EXPECTED = 27;
   let passed = 0, failed = 0;
   const check = (name: string, ok: unknown, detail?: unknown) => {
     if (ok) { passed++; console.log(`PASS ${name}`); } else { failed++; console.log(`FAIL ${name}${detail === undefined ? "" : ` :: ${JSON.stringify(detail)}`}`); }
@@ -89,11 +93,11 @@ async function main() {
   for (const actor of ["cli", "web"]) grantActor(a.stateDir, { owner, actor, lifecycleUid: mintLifecycleUid(), scope: ["supervise", "spawn", "run"], allowSubscribe: [], allowPublish: [] });
   const tokens = { owner: await jwt("owner"), other: await jwt("other") };
 
-  // Two personas on Manager A: one whose child registers ready, one whose child never does.
-  const launches = { native: 0, slow: 0 };
+  // Personas on Manager A: one whose child registers ready, two whose children never do.
+  const launches: Record<string, number> = { native: 0, slow: 0, decoy: 0 };
   const sink = join(rootA, "sink"), ready = join(rootA, "ready"); writeFileSync(sink, "");
   writeFileSync(join(rootA, ".cotal", "agents", "native.md"), "---\nname: native\nagent: browser-native\ncapabilities: []\nallowSubscribe: []\nallowPublish: []\n---\n");
-  writeFileSync(join(rootA, ".cotal", "agents", "slow.md"), "---\nname: slow\nagent: browser-slow\ncapabilities: []\nallowSubscribe: []\nallowPublish: []\n---\n");
+  for (const name of ["slow", "decoy"]) writeFileSync(join(rootA, ".cotal", "agents", `${name}.md`), `---\nname: ${name}\nagent: browser-slow\ncapabilities: []\nallowSubscribe: []\nallowPublish: []\n---\n`);
   const childEnv = { PATH: process.env.PATH!, HOME: process.env.HOME!, TMPDIR: process.env.TMPDIR!, ...(process.env.COTAL_HOME ? { COTAL_HOME: process.env.COTAL_HOME } : {}) };
   registry.register({ kind: "connector", name: "browser-native", requires: ["node"], buildLaunch: (o) => {
     launches.native++;
@@ -103,8 +107,8 @@ async function main() {
       COTAL_BEARER_CMD: JSON.stringify(o.userAuth!.bearerCmd), COTAL_NATIVE_SINK: sink, COTAL_NATIVE_READY: ready,
     } };
   } } as import("@cotal-ai/core").Connector);
-  registry.register({ kind: "connector", name: "browser-slow", requires: ["node"], readinessTimeoutMs: 15_000, buildLaunch: () => {
-    launches.slow++;
+  registry.register({ kind: "connector", name: "browser-slow", requires: ["node"], readinessTimeoutMs: 15_000, buildLaunch: (o) => {
+    launches[o.name] = (launches[o.name] ?? 0) + 1;
     return { command: process.execPath, args: ["-e", "setInterval(() => {}, 1 << 30)"], env: childEnv };
   } } as import("@cotal-ai/core").Connector);
 
@@ -136,8 +140,47 @@ async function main() {
       "/bridge/manager-instances": async (body) => forward("/manager-instances", { idpToken: body.as === "other" ? tokens.other : tokens.owner }),
       "/bridge/exchange": async (body) => forward("/exchange", { idpToken: tokens.owner, actor: "web", view: "manager-caller", managerInstanceId: body.managerInstanceId }),
       "/control/launches": async () => ({ status: 200, body: { ...launches } }),
+      "/control/forge": async (body) => { forging = forgeTerminals(body.goalId, body.caller); return { status: 200, body: { started: true } }; },
+      "/control/forge-report": async () => { await forging; return { status: 200, body: forge }; },
       "/control/stop-b": async () => { await managerB!.manager.stop({ withAgents: true }); managerB = undefined; return { status: 200, body: { stopped: true } }; },
       "/result": async (body) => { results.push({ ...body, launches: { ...launches } }); resultArrived(); return { status: 200, body: { stored: results.length } }; },
+    };
+    // Manager B, with its own real serve credential, forges `succeeded` terminals for a goal the page
+    // follows on A: once under A's instance (the broker must refuse it), and repeatedly under its own,
+    // with the followed goal in the subject and with another goal in the subject but the followed one
+    // in the body. An observer holding the person's own view counts what reaches their progress rows.
+    const forge = { published: 0, denials: [] as string[], deniedUnderA: false, observed: { underA: 0, matching: 0, mismatched: 0 } };
+    let forging: Promise<void> | undefined;
+    const forgeTerminals = async (goalId: string, caller: { owner: string; actor: string; uid: string }) => {
+      const b = managerB!.remote, aSide = managerA!.remote;
+      const enc = new TextEncoder();
+      const hostile = await connect({ servers: fx.servers, authenticator: credsAuthenticator(enc.encode(b.serveCreds)), inboxPrefix: `_INBOX_${b.identities.serve.id}`, maxReconnectAttempts: 0 });
+      const ex = await forward("/exchange", { idpToken: tokens.owner, actor: "web", view: "manager-caller", managerInstanceId: A });
+      const observer = await connect({ servers: fx.servers, ...standaloneConnectOpts({ bearer: (ex.body as any).token, sentinelCreds: a.sentinelCreds, tls: false }), maxReconnectAttempts: 0 });
+      try {
+        observer.subscribe(epGoalProgressGrantRow(a.space, "manager", caller), { callback: (_e, m) => {
+          const forged: unknown = (() => { try { return JSON.parse(new TextDecoder().decode(m.data))?.data?.forged; } catch { return undefined; } })();
+          if (forged === "under-a") forge.observed.underA++;
+          else if (forged === "matching") forge.observed.matching++;
+          else if (forged === "mismatched") forge.observed.mismatched++;
+        } });
+        await observer.flush();
+        void (async () => { for await (const st of hostile.status()) if (st.type === "error") forge.denials.push(String((st as any).error?.message ?? "")); })();
+        const terminal = (forged: string) => enc.encode(JSON.stringify({ v: 1, goalId, phase: "terminal", state: "succeeded", data: { forged } }));
+        const ref = (g: string) => ({ endpoint: "manager", caller, goalId: g });
+        const underA = epeSubject(a.space, "manager", A, aSide.serveGrant.epoch, goalProgressTopic(ref(goalId)));
+        hostile.publish(underA, terminal("under-a"));
+        for (let i = 0; i < 30; i++) {
+          hostile.publish(epeSubject(a.space, "manager", B, b.serveGrant.epoch, goalProgressTopic(ref(goalId))), terminal("matching"));
+          hostile.publish(epeSubject(a.space, "manager", B, b.serveGrant.epoch, goalProgressTopic(ref(`${goalId.slice(0, -1)}${goalId.endsWith("a") ? "b" : "a"}`))), terminal("mismatched"));
+          forge.published += 2;
+          await wait(250);
+        }
+        await hostile.flush(); await observer.flush(); await wait(500);
+        forge.deniedUnderA = forge.denials.some((d) => /permission/i.test(d) && d.includes(underA));
+      } finally {
+        await hostile.close(); await observer.close();
+      }
     };
     page = createServer((q, s) => void (async () => {
       const path = (q.url ?? "/").split("?")[0]!;
@@ -219,6 +262,14 @@ async function main() {
       settled?.pending === false && typeof settled.state === "string" && settled.state !== "succeeded" && settled.committer?.instanceId === A, reload.slowSettled);
     check("C22 the unknown goal was launched exactly once: never resubmitted", reload.launches?.slow === 1, reload.launches);
     check("C23 the browser stayed up for both loads", outcome === "done", outcome);
+    check("C25 Manager B's own serve credential cannot publish goal progress under A's instance (a broker refusal)",
+      first.forge?.deniedUnderA === true && first.forge.observed?.underA === 0, first.forge);
+    check("C26 B's forged succeeded terminals reach the person's own progress rows, with the followed goal or another goal in the subject (instrument control)",
+      first.forge?.observed?.matching > 0 && first.forge.observed.mismatched > 0, first.forge?.observed);
+    const hostile = ok(first.hostile);
+    check("C27 the follow ignores them and returns A's own terminal for that goal, not B's forged success, and launches it once",
+      hostile?.ok === false && hostile.responder === A && typeof hostile.code === "string" && hostile.code !== "succeeded" && hostile.errorOutcome !== "unknown"
+        && !JSON.stringify(first.hostile).includes("forged") && first.launches?.decoy === 1, [first.hostile, first.launches]);
     check("C24 a command the person's view does not carry (status) is a broker refusal before any effect, not unavailable",
       err(first.notGranted)?.code === "permission-denied" && err(first.notGranted)?.outcome === "not-executed" && err(first.notGranted)?.unanswered === false, first.notGranted);
   } finally {

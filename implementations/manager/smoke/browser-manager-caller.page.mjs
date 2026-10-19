@@ -96,6 +96,13 @@ if (phase === "first") {
   // The follow stopped; the Manager still runs the goal it accepted. Wait for its one launch, then read it.
   for (let i = 0; i < 40 && (obs.afterUnknown = await (await fetch("/control/launches")).json()).slow < 1; i++) await new Promise((r) => setTimeout(r, 500));
   await step("unknownRead", () => readFact(a, slowGoal));
+  // Manager B forges terminals for a goal followed on A; A's own terminal must be what the follow returns.
+  const decoyGoal = newGoalId();
+  await step("hostile", async () => {
+    await post("/control/forge", { goalId: decoyGoal, caller: { owner: a.caller.owner, actor: a.caller.actor, uid: a.caller.uid } });
+    return replyOf(await a.followGoal("spawn", { name: "decoy", cwd: cfg.cwd, events: false }, { id: decoyGoal, deadlineMs: 60_000 }));
+  });
+  obs.forge = (await post("/control/forge-report", {})).body;
   await step("stopB", () => post("/control/stop-b", {}));
   await step("unavailable", async () => replyOf(await b.invoke("list-personas", undefined, { deadlineMs: 3_000 })));
   await close(a); await close(b);

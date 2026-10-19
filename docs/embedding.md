@@ -362,7 +362,9 @@ refuses a command the view does not carry. The connection never reconnects on it
 acquires again and re-checks every pin.
 
 `followGoal` submits a goal command once under an envelope id the host persisted before calling
-it, and follows the goal to its terminal with the stock goal follow. `reconcileGoal` reads an
+it, and follows the goal to its terminal with the stock goal follow. Live progress settles the goal
+only when it comes from the instance and epoch that accepted it; any other terminal settles nothing
+and prompts a read of the goal's own record. `reconcileGoal` reads an
 accepted goal back through the Manager's `goal-result` command, and `verifyGoalResultFact` checks
 the returned fact, including its outcome digest, through Web Crypto. Nothing here retries. Three
 outcomes stay distinct: an error reply is a refusal; a goal accepted but not seen to finish answers
