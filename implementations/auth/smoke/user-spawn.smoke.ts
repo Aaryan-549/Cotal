@@ -1347,6 +1347,41 @@ try {
   const narrowedAttach = await epTargeted(auditor, "attach", "alpha");
   check("narrowing the auditor's scope bites its cross-owner reach on the next exchange", narrowedAttach.ok === false, narrowedAttach);
 
+  // ---------- D2. a spawn-scoped view reads status, counting only its own owner's seats ----------
+  // The auth service offers this co-located Manager to every owner, so OWNER_B's manager-caller view
+  // reaches the Manager that runs OWNER's seats. Its spawn scope lets it read the launch options, and
+  // the count it reads is OWNER_B's seats, as its `ps` would list them. Admin reach counts every seat.
+  console.log("D2) a spawn-scoped view of the shared Manager counts only its own owner's seats");
+  {
+    const viewStatus = async (actor: string, scope: string[]): Promise<number | string> => {
+      const g = await cotalAuthProvider.grantAgent({ store, dir, space: SPACE, owner: OWNER_B, actor, scope, allowSubscribe: [], allowPublish: [], lifecycleUid: mintLifecycleUid() });
+      const info = loadAuthServiceInfo(dir)!;
+      const res = await fetch(`${info.url}/exchange`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${info.cap}` },
+        body: JSON.stringify({ owner: OWNER_B, actor, actorToken: g.actorToken, view: "manager-caller" }),
+      });
+      const ex = await res.json() as { token?: string; managerInstanceId?: string; error?: string };
+      if (!res.ok || !ex.token || !ex.managerInstanceId) return `exchange HTTP ${res.status} ${ex.error ?? ""}`;
+      const uid = (decodeJwt(ex.token) as { act: { lifecycleUid: string } }).act.lifecycleUid;
+      const nc = await rawConnect({ servers: SERVER, ...standaloneConnectOpts({ bearer: ex.token, sentinelCreds: g.sentinelCreds, tls: false }), maxReconnectAttempts: 0 });
+      try {
+        const svc = await resolveService(nc, SPACE, "manager", { owner: OWNER_B, actor, uid }, { instanceId: ex.managerInstanceId, deadlineMs: 10_000 });
+        const r = await invokeCommand(nc, SPACE, svc, "status", undefined, { deadlineMs: 10_000 });
+        return r.reply.ok ? (r.reply.data as { agentCount: number }).agentCount : `refused ${r.reply.error?.code}`;
+      } catch (e) {
+        return `refused ${(e as Error).message.slice(0, 200)}`;
+      } finally {
+        await nc.close();
+      }
+    };
+    const total = psList(manager!).length, own = psList(manager!, OWNER_B).length;
+    check("D2 fixture: the shared Manager runs a seat of another owner", total > own, { total, own });
+    const spawnCount = await viewStatus("launchview", ["spawn"]);
+    check("a spawn-scoped view of the shared Manager reads status and counts only its own owner's seats", spawnCount === own, { spawnCount, own, total });
+    const adminCount = await viewStatus("launchadmin", ["spawn", "admin"]);
+    check("...and an admin-scoped view of the same owner counts every seat", adminCount === total, { adminCount, total });
+  }
+
   // ---------- E. the event plane, at the real door, under BOTH rules ----------
   // Two rules meet here and the ORDER is the finding. The delegation envelope says a peer may hand
   // down a subset of what it holds and no more. The OWN-CHANNEL rule says the agent being created
@@ -1883,7 +1918,8 @@ try {
   // (the old 40 was already one short in focus mode; inferred from that run, not run at the base).
   // 42/125 -> 50/133: B1g's eight #2312 cells (precondition, two controls, five refusals).
   // 50/133 -> 57/140: seven owner-equal event-plane admission and grant cells.
-  const EXPECTED = endpointCliFocus ? 57 : 140;
+  // 57/140 -> 57/143: D2's three shared-Manager status cells, inside the block focus mode skips.
+  const EXPECTED = endpointCliFocus ? 57 : 143;
   check(`every cell ran - ${EXPECTED} expected`, cells === EXPECTED + 1, `${cells} cells reported`);
 
   console.log(`\n${endpointCliFocus ? "USER-ENDPOINT CLI SMOKE" : "USER-SPAWN SMOKE"} ${fail === 0 ? "OK ✅" : "FAILED ❌"}  (${pass} passed, ${fail} failed)`);
