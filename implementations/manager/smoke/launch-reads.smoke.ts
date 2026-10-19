@@ -64,8 +64,9 @@ registry.register({ kind: "connector", name: "launch-probe", requires: ["node"],
   buildLaunch: () => { throw new Error("launch-reads: nothing is launched"); } } as import("@cotal-ai/core").Connector);
 let runtimeSpawnCalls = 0;
 const neverSpawn = (): never => { runtimeSpawnCalls++; throw new Error("launch-reads: nothing is launched"); };
-registry.register({ kind: "runtime", name: "launch-delegated", available: () => true,
-  create: () => ({ kind: "launch-delegated", spawn: neverSpawn, spawnDelegated: neverSpawn }) } satisfies import("@cotal-ai/core").RuntimeProvider);
+const delegatedRuntime: import("@cotal-ai/core").RuntimeProvider = { kind: "runtime", name: "launch-delegated", available: () => true,
+  create: () => ({ kind: "launch-delegated", spawn: neverSpawn, spawnDelegated: neverSpawn }) };
+registry.register(delegatedRuntime);
 let service: Awaited<ReturnType<typeof startAuthService>> | undefined;
 let delivery: Awaited<ReturnType<typeof bootDeliveryDaemon>> | undefined;
 let participant: Awaited<ReturnType<typeof nativeRemoteManager>> | undefined;
