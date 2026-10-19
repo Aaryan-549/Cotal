@@ -12,13 +12,23 @@
  *
  * Authority stays the host's: it passes its own connection (`wsconnect`, its current credentials)
  * and the caller it was issued. This entry mints, persists and selects nothing, and never retries.
+ *
+ * `openBrowserManagerCaller` builds that connection for one selected Manager instance from the
+ * signed-in person's `manager-caller` bearer, and adds the stock goal follow and the `goal-result`
+ * read back, so an accepted goal is followed and reconciled and never submitted again.
  */
-import type { NatsConnection } from "@nats-io/nats-core";
-import { describeEndpoint, invokeCommand, type ResolvedCommand, type ResolvedService } from "./endpoint-caller.js";
+import { credsAuthenticator, tokenAuthenticator, wsconnect, type NatsConnection } from "@nats-io/nats-core";
+import { describeEndpoint, goalFollowRefusal, invokeCommand, type ResolvedCommand, type ResolvedService } from "./endpoint-caller.js";
 import type { EpAttributedReply, EpVerbTarget } from "./endpoint-call.js";
 import { EpEnvelopeError, replyRefusedBeforeEffect } from "./endpoint-error.js";
 import type { EpCaller } from "./endpoint-subjects.js";
 import type { CompiledContract } from "./schema-profile.js";
+import type { GoalRef, GoalResultFact } from "./endpoint-action.js";
+import { submitAndFollowGoalWith } from "./endpoint-goal-follow.js";
+import { assertGoalResultFactShape, goalOutcomeDigestMismatch } from "./goal-result-fact.js";
+import { DIGEST_PREFIX, canonicalJson } from "./canonical-json.js";
+import { issuedCallerOfToken } from "./issued-accepted.js";
+import { managerCallerBinding } from "./manager-caller.js";
 
 // The stock classifiers, from THIS entry's own module instance: a host that imported them from the
 // package root would hold a second EpEnvelopeError class, and `instanceof` would miss every error.
@@ -137,4 +147,120 @@ export async function openBrowserEndpointCaller(opts: BrowserEndpointCallerOptio
       return { ...result, outcome };
     },
   };
+}
+
+/** The stock Manager endpoint (`BASELINE_LIFECYCLE_ENDPOINT`). */
+const MANAGER_ENDPOINT = "manager";
+
+/** The signed-in person's authority for one connection. */
+export interface BrowserManagerAuthority {
+  /** Their `manager-caller` bearer, issued for the selected instance (SPEC 10). */
+  bearer: string;
+  /** The space's sentinel credential, which lands the connection in the callout account. */
+  sentinelCreds: string;
+}
+
+export interface BrowserManagerCallerOptions {
+  /** WebSocket URL(s) of the space's broker. */
+  servers: string | string[];
+  space: string;
+  /** The principal and interactive lifecycle the issuer bound the bearer to. */
+  owner: string;
+  actor: string;
+  lifecycleUid: string;
+  /** The Manager instance the person selected. Required: there is no implicit selection. */
+  instanceId: string;
+  /** Returns fresh authority. Called on open and on every `reopen`. */
+  acquire: (signal?: AbortSignal) => Promise<BrowserManagerAuthority>;
+  /** The Manager's contracts, generated at the host's build from `managerBrowserContractSource()`. */
+  contracts: BrowserContractSet;
+  deadlineMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface BrowserManagerCaller extends BrowserEndpointCaller {
+  /** Submit once under the caller's persisted envelope id and follow the goal to its terminal (the
+   *  stock goal follow). A goal still open at the deadline answers `deadline-exceeded` with outcome
+   *  `unknown`, and is read back with `reconcileGoal`, never submitted again. Refuses before sending when the
+   *  Manager serves no `goal-result`, because an accepted goal could never be read back. */
+  followGoal(command: string, args: Record<string, unknown> | undefined, opts: BrowserInvokeOptions & { id: string }): Promise<EpAttributedReply>;
+  /** Read an accepted goal's recorded terminal through the stock `goal-result` command. */
+  reconcileGoal(goalId: string, opts?: { deadlineMs?: number; signal?: AbortSignal }): Promise<EpAttributedReply & { outcome: BrowserInvokeOutcome }>;
+  /** Close this connection and open a new one through `acquire`, re-checking every pin. */
+  reopen(signal?: AbortSignal): Promise<BrowserManagerCaller>;
+  close(): Promise<void>;
+}
+
+const hex = (bytes: ArrayBuffer): string => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
+const sha256Hex = async (text: string): Promise<string> => hex(await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+
+/** `parseGoalResultFact` with Web Crypto: the same shape checks and the same outcome digest. */
+export async function verifyGoalResultFact(raw: unknown, subject: string, ref: GoalRef): Promise<GoalResultFact> {
+  const o = assertGoalResultFactShape(raw, subject, ref);
+  if (DIGEST_PREFIX + await sha256Hex(canonicalJson(o.data === undefined ? null : o.data)) !== o.outcomeDigest) throw goalOutcomeDigestMismatch(subject);
+  return o as unknown as GoalResultFact;
+}
+
+/** Open a caller for one explicitly selected Manager instance. */
+export async function openBrowserManagerCaller(opts: BrowserManagerCallerOptions): Promise<BrowserManagerCaller> {
+  opts.signal?.throwIfAborted();
+  const deadlineMs = opts.deadlineMs ?? 10_000;
+  const authority = await opts.acquire(opts.signal);
+  // The bearer must name this space, principal, lifecycle and instance before anything is dialled.
+  const bound = managerCallerBinding(authority.bearer, {
+    space: opts.space, owner: opts.owner, actor: opts.actor, lifecycleUid: opts.lifecycleUid, instanceId: opts.instanceId,
+  });
+  // The user-mode connect of `standaloneConnectOpts`: a fresh nonce names the connection and its inbox.
+  const connId = `ibx${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
+  const nc = await wsconnect({
+    servers: opts.servers,
+    name: connId,
+    inboxPrefix: `_INBOX_${connId}`,
+    authenticator: [credsAuthenticator(new TextEncoder().encode(authority.sentinelCreds)), tokenAuthenticator(authority.bearer)],
+    maxReconnectAttempts: 0,
+    timeout: Math.min(deadlineMs, 5_000),
+  });
+  try {
+    opts.signal?.throwIfAborted();
+    // The person's manager view is issued at the callout (SPEC 13.15): read its generation back from
+    // this connection's accepted row. A missing row refuses; there is no legacy-rail retry.
+    const caller = await issuedCallerOfToken(nc, opts.space, (await sha256Hex(`cotal.accepted.v1\0${connId}`)).slice(0, 32), bound.caller);
+    const endpointCaller = await openBrowserEndpointCaller({
+      nc, space: opts.space, endpoint: MANAGER_ENDPOINT, caller, instanceId: bound.instanceId, contracts: opts.contracts, deadlineMs,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    const reconcileGoal: BrowserManagerCaller["reconcileGoal"] = (goalId, o = {}) =>
+      endpointCaller.invoke("goal-result", { goalId }, { deadlineMs: o.deadlineMs ?? deadlineMs, ...(o.signal ? { signal: o.signal } : {}) });
+    const handle: BrowserManagerCaller = {
+      ...endpointCaller,
+      async followGoal(command, args, o) {
+        if (typeof o?.id !== "string" || o.id.length === 0)
+          throw new EpEnvelopeError("bad-request", "followGoal needs the caller's persisted envelope id; a goal is never submitted under an id the caller cannot reconcile", undefined, "not-executed");
+        const unfollowable = goalFollowRefusal(endpointCaller.service);
+        if (unfollowable) return unfollowable;
+        const followMs = o.deadlineMs ?? deadlineMs;
+        return submitAndFollowGoalWith(verifyGoalResultFact, nc, opts.space, MANAGER_ENDPOINT, caller, followMs,
+          (signal) => endpointCaller.invoke(command, args, { ...o, ...(signal ? { signal } : {}) }), {
+            reconcile: async (goalId, _attributed, context) => {
+              const q = await reconcileGoal(goalId, { deadlineMs: Math.min(followMs, context.deadlineMs), signal: context.signal });
+              if (q.reply.ok !== true) throw new Error(q.reply.error?.message ?? "goal-result query refused");
+              return q.reply.data as { goalId: string; result?: GoalResultFact } | undefined;
+            },
+            ...(o.signal ? { signal: o.signal } : {}),
+          });
+      },
+      reconcileGoal,
+      async reopen(signal) {
+        await handle.close();
+        return openBrowserManagerCaller({ ...opts, ...(signal ? { signal } : {}) });
+      },
+      async close() {
+        if (!nc.isClosed()) await nc.close();
+      },
+    };
+    return handle;
+  } catch (e) {
+    await nc.close();
+    throw e;
+  }
 }

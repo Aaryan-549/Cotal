@@ -111,7 +111,7 @@ c(`every exported array (${arrays}) and plain-object (${objects}) collection in 
     ["./session-browser", { mod: await import("../src/session-browser.js") as Record<string, unknown>, additions: [] }],
     ["./launch-material", { mod: await import("../src/launch-material.js") as Record<string, unknown>, additions: [] }],
     ["./peer-label", { mod: await import("../src/peer-label.js") as Record<string, unknown>, additions: [] }],
-    ["./browser-control", { mod: await import("../src/browser-control.js") as Record<string, unknown>, additions: ["browserServiceSurface", "openBrowserEndpointCaller"] }],
+    ["./browser-control", { mod: await import("../src/browser-control.js") as Record<string, unknown>, additions: ["browserServiceSurface", "openBrowserEndpointCaller", "openBrowserManagerCaller", "verifyGoalResultFact"] }],
     ["./browser-validators-build", { mod: await import("../src/browser-validators-build.js") as Record<string, unknown>, additions: ["generateBrowserContracts"] }],
   ]);
   const unexpected = keys.filter((k) => k !== "." && !ALLOWED_SUBPATHS.has(k));

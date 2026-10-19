@@ -30,6 +30,8 @@ export interface HostedAuthAccount {
 
 export interface HostedAuthFixture {
   servers: string;
+  /** The broker's loopback websocket listener (`ws://`), present only when asked for. */
+  wsServers?: string;
   dir: string;
   accounts: HostedAuthAccount[];
   /** Provision one more injected store for an EXISTING space slug under a freshly created account
@@ -42,8 +44,9 @@ export interface HostedAuthFixture {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function startHostedAuthFixture(label: string, count = 2): Promise<HostedAuthFixture> {
+export async function startHostedAuthFixture(label: string, count = 2, opts: { websocket?: boolean } = {}): Promise<HostedAuthFixture> {
   const port = await pickFreePort();
+  const wsPort = opts.websocket ? await pickFreePort() : undefined;
   const servers = `nats://127.0.0.1:${port}`;
   const broker = await createBrokerAuth(`${label}-broker`);
   const stamp = Date.now();
@@ -65,7 +68,7 @@ export async function startHostedAuthFixture(label: string, count = 2): Promise<
     calloutAccounts.push({ pub: callout.account.pub, jwt: callout.account.jwt });
     accounts.push({ space, accountPublicKey: auth.account.pub, store, stateDir, sentinelCreds: callout.sentinelCreds, auth });
   }
-  writeFileSync(join(dir, "server.conf"), serverConfig(broker, spaceAccounts, { transport: { kind: "plaintext" }, port, storeDir: join(dir, "js"), extraAccounts: calloutAccounts }));
+  writeFileSync(join(dir, "server.conf"), serverConfig(broker, spaceAccounts, { transport: { kind: "plaintext" }, port, storeDir: join(dir, "js"), extraAccounts: calloutAccounts, ...(wsPort !== undefined ? { wsPort } : {}) }));
   let nats: ChildProcess = spawn("nats-server", ["-c", join(dir, "server.conf")], { stdio: "ignore" });
   let release = teardownOnSignal(nats, dir);
   let up = false;
@@ -73,6 +76,7 @@ export async function startHostedAuthFixture(label: string, count = 2): Promise<
   if (!up) { await killAndAwaitExit(nats, "SIGKILL"); release(); throw new Error(`nats-server did not come up on ${port}`); }
   return {
     servers, dir, accounts,
+    ...(wsPort !== undefined ? { wsServers: `ws://127.0.0.1:${wsPort}` } : {}),
     async stopBroker() {
       await killAndAwaitExit(nats, "SIGTERM");
       nats.unref();
