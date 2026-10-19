@@ -905,6 +905,11 @@ every manager request to one exact live registered instance and is valid with no
 exchange selects from read-only observations of manager issuance gates and service registrations.
 It refuses zero or ambiguous candidates and refuses an unavailable owner-specific remote manager
 rather than falling through to a co-located manager. An explicit selector must name a live candidate.
+The auth service lists the same observations to a signed-in human at `POST /manager-instances` on
+both faces: it verifies the same IdP proof, derives the owner the same way, and answers every manager
+gate of that owner with the verdict selection reads. Selection reads that list, so the two cannot
+disagree. A listed candidate is registration evidence, not proof that the instance answers, and a
+failed read is unavailable, never an empty list.
 The `session-caller` view carries a required `act.session` claim `{endpoint, sessionId, epoch, exp}`
 (exp in unix seconds) and is valid with no other view; `act.session` is valid only with it. It needs no
 ledger scope: the redeemed §13.6 session grant is the authority. The human exchange accepts it only

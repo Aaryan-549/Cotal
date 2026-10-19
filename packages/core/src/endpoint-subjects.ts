@@ -177,6 +177,13 @@ export function callerTokens(caller: EpCaller): string[] {
   ];
 }
 
+/** Per-goal live progress read row (§13.9 "Live event progress", reserved `goal` topic):
+ *  `epe.<endpoint>.*.*.goal.<cO>.<cA>.<cUid>.>` — the caller identity in the subject gives
+ *  mint-time read containment; delivered on the caller's own core subscription only. */
+export function epGoalProgressGrantRow(space: string, endpoint: string, caller: EpCaller): string {
+  return `${spacePrefix(space)}.epe.${endpointToken(endpoint)}.*.*.goal.${callerTokens(caller).join(".")}.>`;
+}
+
 /** A caller that rides the versioned rail (SPEC 13.15): the triple plus its accepted generation.
  *  Every subject and grant builder emits the `ep.v1` form exactly when the caller carries this
  *  field, so one caller value decides both the subject a client publishes and the rows a mint

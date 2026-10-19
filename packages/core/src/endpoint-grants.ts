@@ -15,7 +15,7 @@ import {
   endpointToken, assertCommandToken, assertLifecycleToken, assertBoundedOwner,
   type EpCaller, type EpTarget,
   epCallerReplyFilter, epResponderReplyPattern, epResponderIssuedReplyPattern, epClassQueueGroup,
-  epPlaneTokens, callerRailTokens, callerTokens, EP_RAIL_V1,
+  epPlaneTokens, callerRailTokens, callerTokens, epGoalProgressGrantRow, EP_RAIL_V1,
 } from "./endpoint-subjects.js";
 
 /** A minted request capability: one endpoint command a caller may invoke, on the named rails.
@@ -107,13 +107,6 @@ export function epJournalGrantRow(space: string, cap: EpCapability, caller: EpCa
 /** The caller's reply-rail read row (§13.9 "Reply subscribe"): its own rail only, exact arity. */
 export function epCallerReplyGrantRow(space: string, caller: EpCaller): string {
   return epCallerReplyFilter(space, caller);
-}
-
-/** Per-goal live progress read row (§13.9 "Live event progress", reserved `goal` topic):
- *  `epe.<endpoint>.*.*.goal.<cO>.<cA>.<cUid>.>` — the caller identity in the subject gives
- *  mint-time read containment; delivered on the caller's own core subscription only. */
-export function epGoalProgressGrantRow(space: string, endpoint: string, caller: EpCaller): string {
-  return `${spacePrefix(space)}.epe.${endpointToken(endpoint)}.*.*.goal.${callerTriple(caller)}.>`;
 }
 
 /** All caller-side rows for a capability set: request-publish (+ optional journal) into

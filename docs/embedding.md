@@ -348,6 +348,36 @@ only, so a command whose closure spans several documents refuses. The generated 
 Ajv's runtime helpers (`ajv/dist/runtime/*.js`), so the host's bundler must resolve `ajv` from
 where the host writes that module.
 
+`openBrowserManagerCaller` opens a Manager caller for ONE instance the person selected; there is no
+implicit selection. It takes the broker's websocket URL, the space, the principal and lifecycle the
+bearer is bound to, the instance, and the Manager's contracts generated from
+`managerBrowserContractSource()` (`@cotal-ai/manager`). Authority comes from an `acquire` callback
+that returns the person's own `manager-caller` bearer and the space's sentinel credential; an
+embedding's backend obtains the bearer from the stock exchange with the person's IdP proof. The
+bearer's space, principal, lifecycle and instance are checked before anything is dialled, and the
+describe is pinned to that instance. The view carries only the commands the person's ledger scope
+grants. `spawn`, for example, carries `spawn`, `despawn`, `inspect`, the persona commands and
+`goal-result`, while operator reads such as `status` and `models` come only with `admin`; the broker
+refuses a command the view does not carry. The connection never reconnects on its own; `reopen`
+acquires again and re-checks every pin.
+
+`followGoal` submits a goal command once under an envelope id the host persisted before calling
+it, and follows the goal to its terminal with the stock goal follow. `reconcileGoal` reads an
+accepted goal back through the Manager's `goal-result` command, and `verifyGoalResultFact` checks
+the returned fact, including its outcome digest, through Web Crypto. Nothing here retries. Three
+outcomes stay distinct: an error reply is a refusal; a goal accepted but not seen to finish answers
+outcome `unknown` and is read back, never submitted again; a request no instance answered throws
+the stock unanswered error (`unansweredRequest`).
+
+`POST /manager-instances` on the auth service lists the signed-in person's own Manager instances. It
+takes `{ idpToken }`, verifies it as the human exchange does and answers
+`{ v: 1, owner, complete: true, instances: [{ instanceId, placement, state }] }`. `placement` is
+`remote` or `local`; `state` is the verdict the `manager-caller` exchange selects on (`candidate`,
+`not open`, `not registered`, `not this owner's`, `unknown`). A `candidate` is registration
+evidence, not proof that the instance answers; a describe pinned to it is. The route refuses
+browser-origin requests like every exchange route, so a page reaches it through its own backend,
+and a failed gate read answers 503, never an empty list.
+
 ### Remote manager client composition
 
 `@cotal-ai/manager` exports the `remoteManagerClient` namespace, containing the stock remote

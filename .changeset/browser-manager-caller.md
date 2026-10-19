@@ -1,0 +1,5 @@
+---
+"@cotal-ai/core": minor
+---
+
+`@cotal-ai/core/browser-control` now opens a Manager caller in a strict-CSP page. `openBrowserManagerCaller` opens one connection for one explicitly selected Manager instance with the person's own `manager-caller` bearer: it checks the bearer's space, principal, lifecycle and instance before dialling, reads the issued caller, pins the describe to the instance and uses the host's generated contracts. It never reconnects on its own; `reopen` re-checks every pin. `followGoal` submits a goal once under the host's persisted envelope id and runs the stock goal follow; `reconcileGoal` reads an accepted goal back through `goal-result`; `verifyGoalResultFact` checks the fact with Web Crypto. Nothing retries, and an accepted goal is never submitted again. To share the follow, it moved into a module without transport-node and takes the host's fact verifier (`submitAndFollowGoalWith`), and the goal-result shape checks moved out of `endpoint-action`. The package root's `submitAndFollowGoal`, `parseGoalResultFact`, `GOAL_TERMINAL_STATES` and `epGoalProgressGrantRow` are unchanged.
