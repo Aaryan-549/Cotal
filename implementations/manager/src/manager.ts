@@ -37,6 +37,7 @@ import {
   firstFreeName,
   spawnNameError,
   idFromCreds,
+  identityFromCreds,
   inspectCredHealth,
   credsRenewalDelayMs,
   composeWirePersona,
@@ -104,7 +105,7 @@ import { authorizeLaunch, authorizeNamedControl } from "./authorize.js";
 import { controlShutdown } from "./control-shutdown.js";
 import { RunHosting } from "./run-hosting.js";
 import { controlSession } from "./control-session.js";
-import { MAX_AGENTS, parseResumeCommitArgs, parseResumeControlArgs, parseResumeFinalizeArgs } from "./resume.js";
+import { MAX_AGENTS, parseResumeCommitArgs, parseResumeControlArgs, parseResumeFinalizeArgs, readSeatRecord, removeSeatRecord, writeSeatRecord, type SeatRecord } from "./resume.js";
 import { TranscriptReceiver, type TranscriptClaim, type TranscriptReceiveInput } from "./transcript-receive.js";
 // Unit B (the static §13.1 lifecycle executor): the shared grammar/stores from core plus the
 // manager-side adapter (transport + slot orchestration + the F1 terminal) — see static-lifecycle.ts.
@@ -601,7 +602,8 @@ export type FreeSlotCause =
   | "session-bind-failed"
   | "resume-session-rebind-failed"
   | "carried-fork-refused"
-  | "resume-custody-unrecorded";
+  | "resume-custody-unrecorded"
+  | "supervise-record-failed";
 
 /** Operator-facing phrasing per cause. Kept beside the union so adding a member without a sentence
  *  is a type error rather than a blank in the log. The stop family's sentences carry the principal
@@ -617,6 +619,7 @@ const FREE_SLOT_CAUSE_TEXT: Record<Exclude<FreeSlotCause, FreeSlotStopCause>, st
   "resume-session-rebind-failed": "this manager stopped it: its host session could not be rebound on resume",
   "carried-fork-refused": "this manager stopped it: it recorded no fork of the carried transcript",
   "resume-custody-unrecorded": "this manager stopped it: its custody reference could not be recorded on resume",
+  "supervise-record-failed": "this manager stopped it: its supervise policy could not be recorded for a manager restart",
 };
 
 /** The stop family's sentences — the same job {@link FREE_SLOT_CAUSE_TEXT} does for the string
@@ -709,6 +712,14 @@ export interface ManagerResumeAgent {
    *  had already consumed, instead of replaying the whole retained window. Absent when the manager
    *  held no local space authority to read the frontier at the cut (a remote-authority manager). */
   backfillFloor?: number;
+}
+
+/** A crash restart of a supervised seat (#4094): its policy, the deaths counted against it including
+ *  this one, and the roster timestamp a new heartbeat must pass to count as its readiness. */
+interface SupervisedRestart {
+  policy: { restarts: number; windowMs: number };
+  crashes: number[];
+  joinedAfter: number;
 }
 
 export interface ManagerResumeInventory {
@@ -2895,6 +2906,14 @@ export class Manager {
   }
 
   private resumeEntry(a: ManagedAgent, backfillFloor?: number): ManagerResumeAgent {
+    // A preservation cut is a stop boundary too, so a manifest launch after it reopens what a resume would.
+    this.recordContinuityAtStop(a, "preservation");
+    return this.resumeEntryOf(a, backfillFloor);
+  }
+
+  /** The resume entry of one live seat, with no side effect: a preservation cut and a supervised
+   *  seat's record both build it. */
+  private resumeEntryOf(a: ManagedAgent, backfillFloor?: number): ManagerResumeAgent {
     const principal = a.userOwner
       ? parsePrincipalKey(a.id)
       : { owner: DEV_OWNER, actor: a.id };
@@ -2924,8 +2943,6 @@ export class Manager {
             return { mode: "static" as const, id: principal.actor, lifecycleUid: a.lifecycleUid, credential: { kind: "file" as const, path: files.creds, sha256: this.fileDigestOrEmpty(files.creds) }, ...(a.issued ? { issued: a.issued } : {}) };
           })()
         : { mode: "open", id: principal.actor, lifecycleUid: a.lifecycleUid };
-    // A preservation cut is a stop boundary too, so a manifest launch after it reopens what a resume would.
-    this.recordContinuityAtStop(a, "preservation");
     const dependencies = [a.launch.source.configPath];
     if (a.launch.source.kind === "manifest" && a.launch.source.runId)
       dependencies.unshift(join(this.workspaceRoot, ".cotal", "run", `${a.launch.source.runId}.json`));
@@ -2949,7 +2966,8 @@ export class Manager {
         shareTools: a.launch.shareTools,
         forkSource: a.launch.forkSource,
         ...(this.forkProvenance(a) ? { resumed: this.forkProvenance(a) } : {}),
-        sessionId: a.restart?.armed ? this.readManagedSession(a) : a.launch.sessionId,
+        // A supervised seat whose connector keeps no session state is armed with no state file to read.
+        sessionId: a.restart?.armed && a.restart.sessionStatePath ? this.readManagedSession(a) : a.launch.sessionId,
         // Additive and only when the connector supplied one. A seat with no pointer records no
         // field, which is what keeps an older inventory and a fresh one the same document shape.
         ...(a.restart?.sessionStatePath ? { sessionStatePath: a.restart.sessionStatePath } : {}),
@@ -2979,6 +2997,7 @@ export class Manager {
       // stop can't strand the rest, and every snapshot entry is deprovisioned below regardless.
       this.recordContinuityAtStop(a, "shutdown");
       this.agents.delete(a.name);
+      this.dropSeatRecord(a);
       const refused = this.stopHandle(a, false);
       if (refused === undefined) stopped.push(a);
       else failures.push(`${a.name}: stop failed: ${refused}`);
@@ -4502,6 +4521,7 @@ export class Manager {
     this.agents.delete(a.name);
     this.recordContinuityAtStop(a, "stop");
     if (a.restart?.sessionStatePath) rmSync(a.restart.sessionStatePath, { force: true });
+    this.dropSeatRecord(a);
     if (a.seatHome) rmSync(a.seatHome, { recursive: true, force: true });
     // End any live §13.6 attach session bound to THIS incarnation with the honest
     // `target-despawn` reason. Fires once per agent on every free path (despawn / self-stop / reap /
@@ -5163,6 +5183,7 @@ export class Manager {
         replacement = undefined;
         restart.opts = opts;
         restart.recovering = false;
+        this.refreshSeatRecord(a);
         if (continueSession !== undefined)
           console.error(`! ${a.name}: recovered Pi session ${continueSession} after crash (${restart.crashes.length}/${limit})`);
         else
@@ -6501,6 +6522,17 @@ export class Manager {
         } else {
           managed.restart.armed = true;
         }
+        if (managed.restart.policy) {
+          try {
+            this.recordSeat(managed);
+          } catch (error) {
+            const detail = `${managed.name} joined, but supervise cannot cover a manager restart for it: ${rejectionText(error)}`;
+            this.stopHandle(managed, false);
+            this.freeSlot(managed, true, "supervise-record-failed");
+            await hooks?.onOutcome?.({ kind: "failed", data: { error: detail } });
+            return { ok: false, error: detail };
+          }
+        }
       }
       this.watchExit(managed);
       // Reply with the id the slot actually carries (user-mode: the owner.actor principal —
@@ -6880,13 +6912,15 @@ export class Manager {
     return undefined;
   }
 
-  /** Validate/relaunch one retained inventory entry. Called only through resumePreserved so all
-   * records pass the same preflight before the first child is exposed. */
+  /** Validate/relaunch one retained inventory entry. Called through resumePreserved so all records
+   * pass the same preflight before the first child is exposed, and through restartSupervisedSeat
+   * with the one record a crashed manager left (`supervised`). */
   private async resumePreservedAgent(
     entry: ManagerResumeAgent,
     preflightOnly = false,
     batchReserved = false,
     prepared?: Map<string, PreparedResume>,
+    supervised?: SupervisedRestart,
   ): Promise<ControlReply> {
     if (this.execution === "none") return { ok: false, error: this.executionRefusal() };
     const release = this.beginLifecycle(batchReserved);
@@ -6911,7 +6945,7 @@ export class Manager {
         } catch (e) {
           return { ok: false, error: rejectionText(e) };
         }
-        return this.launchPreparedResume(entry, cached, batchReserved);
+        return this.launchPreparedResume(entry, cached, batchReserved, supervised);
       }
       try {
         const cwd = lstatSync(entry.launch.cwd);
@@ -7022,7 +7056,7 @@ export class Manager {
         const value = { spec, launchOpts, ...authority, exact } satisfies PreparedResume;
         prepared?.set(entry.name, value);
         if (preflightOnly) return { ok: true, data: { name: entry.name, preflight: true } };
-        return this.launchPreparedResume(entry, value, batchReserved);
+        return this.launchPreparedResume(entry, value, batchReserved, supervised);
       } catch (e) {
         return { ok: false, error: rejectionText(e) };
       }
@@ -7035,6 +7069,7 @@ export class Manager {
     entry: ManagerResumeAgent,
     prepared: PreparedResume,
     batchReserved: boolean,
+    supervised?: SupervisedRestart,
   ): Promise<ControlReply> {
     if (!batchReserved) this.reserved.add(entry.name);
     try {
@@ -7044,7 +7079,13 @@ export class Manager {
       let adoptedSeed: string | undefined;
       if (entry.identity.mode === "static") {
         const stored = await this.secrets.get(agentSecretKeyForFile(resolve(entry.identity.credential.path), this.space));
-        adoptedSeed = stored === undefined ? undefined : /-----BEGIN USER NKEY SEED-----\s*([A-Z0-9]+)\s*-----END USER NKEY SEED-----/.exec(stored)?.[1];
+        // The core parser, which reads the creds format's six-dash END marker. A local pattern that
+        // expected five matched no real file, so every resumed seat lost its renewal.
+        try {
+          adoptedSeed = stored === undefined ? undefined : identityFromCreds(stored).seed;
+        } catch {
+          adoptedSeed = undefined;
+        }
         if (adoptedSeed === undefined)
           console.error(`! resume ${entry.name}: the adopted credential carries no readable nkey seed - the manager cannot renew it (it dies loud at its exp)`);
       }
@@ -7096,9 +7137,11 @@ export class Manager {
           ...(prepared.launchOpts.resume !== undefined && prepared.spec.resumeRecordPath ? { resumeRecordPath: prepared.spec.resumeRecordPath } : {}),
           sessionId: entry.launch.sessionId,
         },
-        ...(prepared.spec.sessionStatePath
-          ? { restart: { opts: prepared.launchOpts, sessionStatePath: prepared.spec.sessionStatePath, crashes: [], recovering: false, armed: false } }
-          : {}),
+        ...(supervised
+          ? { restart: { opts: prepared.launchOpts, sessionStatePath: prepared.spec.sessionStatePath, crashes: supervised.crashes, recovering: false, armed: false, policy: supervised.policy } }
+          : prepared.spec.sessionStatePath
+            ? { restart: { opts: prepared.launchOpts, sessionStatePath: prepared.spec.sessionStatePath, crashes: [], recovering: false, armed: false } }
+            : {}),
         suppressCleanup: true,
       };
       this.agents.set(entry.name, managed);
@@ -7109,14 +7152,18 @@ export class Manager {
       } catch (error) {
         return await this.stopFailedResume(managed, "resume-custody-unrecorded", `${managed.name} resumed, but ${rejectionText(error)}`);
       }
-      const readiness = await this.awaitReadiness(managed, readinessTimeoutMs);
+      const readiness = await this.awaitReadiness(managed, readinessTimeoutMs, supervised ? { joinedAfter: supervised.joinedAfter } : {});
       if (!readiness.ok && !readiness.uncertain) return { ok: false, error: readiness.detail };
       if (!readiness.ok) {
         this.watchExit(managed);
         this.watchResumeAdoption(managed);
         return { ok: false, error: readiness.detail };
       }
-      if (managed.restart || prepared.exact) {
+      // A supervised restart arms the way its spawn did: a connector with no session continuation is
+      // armed at readiness, one with it once its session is proved below.
+      if (supervised && managed.restart && !connector.supportsSessionContinuation && !prepared.exact) {
+        managed.restart.armed = true;
+      } else if (managed.restart || prepared.exact) {
         try {
           await this.armSessionRecovery(managed);
           // As on a manifest launch, an exact seat is recorded only at the session it asked for,
@@ -7140,6 +7187,7 @@ export class Manager {
         }
       }
       if (!this.resumeAttemptId) managed.suppressCleanup = false;
+      if (supervised) this.refreshSeatRecord(managed);
       this.watchExit(managed);
       if (this.agents.get(managed.name) !== managed)
         return { ok: false, error: `${managed.name} exited immediately after same-principal readiness` };
@@ -9469,6 +9517,103 @@ export class Manager {
     );
   }
 
+  /** Persist what a successor needs to take this seat back if this process ends without stopping
+   *  it: today a supervised seat, which a successor restarts (#4094). Static meshes only: a successor
+   *  finds the seat through its active slot row, and only a static mesh keeps one. Throws when the
+   *  entry could not be resumed, because a policy this host cannot keep across a manager restart is
+   *  one it cannot enforce. */
+  private recordSeat(a: ManagedAgent): void {
+    const restart = a.restart;
+    if (!restart?.policy || !this.auth || this.userMode) return;
+    const agent = this.resumeEntryOf(a);
+    const unresumable = this.inventoryReferenceError(agent);
+    if (unresumable) throw new Error(`a successor manager could not restart it: ${unresumable}`);
+    writeSeatRecord(this.workspaceRoot, { version: "cotal-seat-record/v1", instanceId: this.managerInstanceId, supervise: restart.policy, crashes: restart.crashes, agent });
+  }
+
+  /** Bring a running seat's record up to date after its credential or restart count changed. A
+   *  record that cannot be rewritten is removed, so a successor retires the seat rather than taking
+   *  it back from a stale one. */
+  private refreshSeatRecord(a: ManagedAgent): void {
+    if (!a.restart?.policy) return;
+    try {
+      this.recordSeat(a);
+    } catch (error) {
+      console.error(`! ${a.name}: its seat record could not be updated (${rejectionText(error)}); a manager restart now retires it`);
+      this.dropSeatRecord(a);
+    }
+  }
+
+  private dropSeatRecord(a: { name: string; lifecycleUid: string }): void {
+    try {
+      removeSeatRecord(this.workspaceRoot, this.space, a.name, a.lifecycleUid);
+    } catch (error) {
+      console.error(`! ${a.name}: its seat record could not be removed: ${rejectionText(error)}`);
+    }
+  }
+
+  /** The seat record behind one active slot this instance owns, when it describes that exact
+   *  incarnation on this runtime. Anything else is left to the ordinary terminal. */
+  private seatRecordFor(row: StaticManagedSlotRow): SeatRecord | undefined {
+    let record: SeatRecord | undefined;
+    try {
+      record = readSeatRecord(this.workspaceRoot, this.space, row.alias);
+    } catch (error) {
+      console.error(`! ${row.alias}: ${rejectionText(error)}; the lifecycle is retired, not restarted`);
+      return undefined;
+    }
+    if (record === undefined) return undefined;
+    const identity = record.agent.identity;
+    if (identity.mode !== "static" || identity.id !== row.actor || identity.lifecycleUid !== row.lifecycleUid) return undefined;
+    if (record.instanceId !== this.managerInstanceId || record.agent.space !== this.space) return undefined;
+    if (record.agent.launch.runtime !== this.requiredRuntime.kind) {
+      console.error(`! ${row.alias}: its seat ran on runtime "${record.agent.launch.runtime}" and this manager uses "${this.requiredRuntime.kind}"; the lifecycle is retired, not restarted`);
+      return undefined;
+    }
+    return record;
+  }
+
+  /** Restart a supervised seat whose manager ended without stopping it (#4094), as one restart of
+   *  its own policy. It goes through the resume launch, so the seat comes back under the same name,
+   *  lifecycle uid, credential, persona and cwd, and a pending turn addressed to it is served to it.
+   *  Returns why it could not, and the caller then retires the lifecycle. */
+  private async restartSupervisedSeat(row: StaticManagedSlotRow, record: SeatRecord): Promise<string | undefined> {
+    const policy = record.supervise;
+    if (policy === undefined) return "its spawn carried no restart policy";
+    const now = Date.now();
+    const crashes = [...record.crashes.filter((at) => now - at < policy.windowMs), now];
+    if (crashes.length > policy.restarts)
+      return `its supervise restart budget is spent (${crashes.length} deaths in ${policy.windowMs / 1000}s, ${policy.restarts} allowed)`;
+    // A seat that outlived its manager must not run beside its replacement, so the one the slot
+    // names is reaped first. A runtime that cannot prove it gone refuses, and the terminal retires it.
+    if (row.runtime !== undefined) {
+      try {
+        const evidence = await requireRuntimeReap(this.requiredRuntime, row.runtime);
+        console.error(`${row.alias}: the seat its previous manager left ${evidence.detail}`);
+      } catch (error) {
+        return `the seat its previous manager left could not be reaped: ${rejectionText(error)}`;
+      }
+    }
+    await this.ep.waitForPresenceSnapshot();
+    // Readiness counts only a heartbeat newer than any the dead seat left, as an in-place restart does.
+    const principal = principalKey(DEV_OWNER, row.actor).key;
+    const joinedAfter = this.ep.getRoster()
+      .filter((p) => p.card.id === principal && p.lifecycleUid === row.lifecycleUid)
+      .reduce((max, p) => Math.max(max, p.ts), 0) + 1;
+    const reply = await this.resumePreservedAgent(record.agent, false, false, undefined, { policy, crashes, joinedAfter });
+    const live = this.agents.get(row.alias);
+    if (reply.ok) {
+      console.error(`! ${row.alias}: restarted under the same lifecycle after its manager stopped (${crashes.length}/${policy.restarts})`);
+      return undefined;
+    }
+    // An uncertain readiness keeps the seat managed and watched, as any launch does.
+    if (live?.lifecycleUid === row.lifecycleUid) {
+      console.error(`! ${row.alias}: restarted after its manager stopped, but readiness is uncertain: ${reply.error}`);
+      return undefined;
+    }
+    return `its restart failed: ${reply.error}`;
+  }
+
   /** The terminal's process step: an orphan (no live handle in THIS process) is reaped by the custody
    *  reference the slot recorded, before its footprint goes. A successor must never retire a
    *  lifecycle and free its alias while the predecessor's seat process is still running outside
@@ -9618,6 +9763,8 @@ export class Manager {
     const credsPath = a.secretPaths!.creds!;
     await secrets.put(agentSecretKeyForFile(credsPath, this.space), creds);
     await materializeSecretToFile(secrets, agentSecretKeyForFile(credsPath, this.space), credsPath);
+    // The record pins the credential's digest, so it follows the re-signed file.
+    this.refreshSeatRecord(a);
     console.error(`managed cred renewal ${a.name}: re-signed for the same identity (exp +${MANAGED_STATIC_TTL_SEC}s); the agent endpoint's source re-read adopts it`);
   }
 
@@ -9885,6 +10032,7 @@ export class Manager {
       let preservedAdopted = 0;
       let deferredSlots = 0;
       const terminalRows: StaticManagedSlotRow[] = [];
+      const restartRows: Array<{ row: StaticManagedSlotRow; record: SeatRecord }> = [];
       for (const row of slotRows) {
         if (row.phase === "retired") {
           // A retirement is a GLOBAL refusal fact — seed the F5 index for EVERY retired incarnation
@@ -9920,12 +10068,34 @@ export class Manager {
           deferredSlots++;
           continue;
         }
+        // A boot after this instance's manager ended without stopping its seats: a supervised seat
+        // with a record is restarted under its own policy instead of retired (#4094).
+        if (!postAdoption && row.phase === "active" && !adopted) {
+          const record = this.seatRecordFor(row);
+          if (record) {
+            restartRows.push({ row, record });
+            continue;
+          }
+        }
         if (planStaticSlotResume(row, adopted) !== "none") terminalRows.push(row);
       }
       try {
         // Mark the complete planned set before the first terminal awaits. A timer owns only its own
         // alias, but the initial serial sweep must close every discovery-to-await gap up front.
         for (const row of terminalRows) this.reconcilingAliases.add(row.alias);
+        for (const { row } of restartRows) this.reconcilingAliases.add(row.alias);
+        // Restarts run first; one that cannot restart joins the terminals below.
+        for (const { row, record } of restartRows) {
+          if (this.staticReconcileStopping) break;
+          const refusal = await this.restartSupervisedSeat(row, record);
+          if (refusal === undefined) {
+            this.reconcilingAliases.delete(row.alias);
+            continue;
+          }
+          console.error(`! ${row.alias}: the supervised seat its previous manager left was not restarted (${refusal}); retiring the lifecycle`);
+          this.dropSeatRecord({ name: row.alias, lifecycleUid: row.lifecycleUid });
+          terminalRows.push(row);
+        }
         const sweepDeprovision: DeprovisionResourceAccounting = {
           examined: 0,
           deleted: 0,
@@ -10015,6 +10185,7 @@ export class Manager {
         }
       } finally {
         for (const row of terminalRows) this.reconcilingAliases.delete(row.alias);
+        for (const { row } of restartRows) this.reconcilingAliases.delete(row.alias);
       }
     } finally {
       this.releaseStaticReconcileSweep();
