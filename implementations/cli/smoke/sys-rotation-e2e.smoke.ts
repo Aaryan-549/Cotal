@@ -267,7 +267,9 @@ try {
   survivors("down 1");
   mark = logSize();
   const boot2 = cotal(["up", "--detach", "--space", SPACE, "--server", SERVERS]);
-  check("a plain `cotal up` comes back", boot2.code === 0, boot2.out.slice(-500));
+  // The expired evictor cannot verify-evict the previous manager's serve family, so its restart
+  // fails closed. A degraded first boot exits 1 (#3893), even though broker and delivery start.
+  check("a plain `cotal up` reports the degraded control plane", boot2.code === 1 && /control plane degraded:/.test(boot2.out), boot2.out.slice(-500));
   // Wait for THIS boot's daemon before the next `down`; see `settleThenDown` for why a
   // seconds-old daemon must not be stopped here.
   const tail2 = await daemonTail(mark);
