@@ -105,7 +105,9 @@ async function child(scenario: string): Promise<void> {
       await once(input, "end");
     }
     if (scenario === "destroyed-before") input.destroy();
+    let bufferedOut = "";
     if (scenario === "buffered") {
+      output.on("data", (chunk: Buffer) => { bufferedOut += chunk.toString("utf8"); });
       input.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "hosted-smoke", version: "1" } } }) + "\n");
       assert.equal(input.readableEnded, false);
     }
@@ -172,6 +174,15 @@ async function child(scenario: string): Promise<void> {
         assert.ok(events.includes("end"));
         if (scenario === "eof") assert.equal(existsSync(join(process.cwd(), "sibling.sock")), true);
         if (scenario === "failure") assert.equal(code, 0, "a stopped dial failure is not a teardown failure");
+        if (scenario === "buffered") {
+          const initReply = JSON.parse(bufferedOut.trim().split("\n")[0]) as {
+            result?: { serverInfo?: { name?: string; version?: string }; instructions?: string };
+          };
+          assert.equal(initReply.result?.serverInfo?.name, "cotal");
+          assert.notEqual(initReply.result?.serverInfo?.version, "0.0.0");
+          assert.match(initReply.result?.serverInfo?.version ?? "", /^\d+\.\d+\.\d+/);
+          assert.match(initReply.result?.instructions ?? "", new RegExp(`Cotal v${(initReply.result?.serverInfo?.version ?? "").replace(/\./g, "\\.")}`));
+        }
       } else {
         assert.ok(events.includes("close"));
         assert.equal(events.includes("end"), false);

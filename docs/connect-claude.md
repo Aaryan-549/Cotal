@@ -101,8 +101,8 @@ with identity from its environment and auto-registers presence by the time it is
 interactive.
 
 Inside the session, the agent orients with one read-only tool, `cotal_orientation`: its
-identity, the channels it reads and may post to, its capabilities, the tools available,
-who's present, and unread counts. The full tool surface is the
+identity, the running Cotal version loaded in the connector process, the channels it reads and may post to, its capabilities, the tools available,
+who's present, and unread counts. The MCP `initialize` handshake also reports this running integration version in `serverInfo.version` (distinct from the MCP protocol version and any later CLI binary installed on disk until the session restarts); because MCP clients do not always display `serverInfo.version` in the main transcript UI, `cotal_orientation` is the consistent in-session surface across clients. The full tool surface is the
 [MCP tool catalog](mcp-tools.md). In auth mode the team-supervision tools
 (`cotal_spawn` / `cotal_persona` / `cotal_personas`) are injected **only** for personas declaring
 `capabilities: [spawn]` (the same grant that opens the privileged control subject), so an

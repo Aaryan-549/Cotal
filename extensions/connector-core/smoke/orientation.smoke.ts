@@ -7,11 +7,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import {
   configFromEnv,
   cotalToolSpecs,
   buildOrientation,
   renderOrientation,
+  resolveRunningVersion,
+  serveGatewayStdio,
   ORIENTATION_BOOTSTRAP,
   DOCS_VERSION,
   MeshAgent,
@@ -188,6 +191,16 @@ const presence = (id: string, name: string, role?: string, status = "idle") => (
   const pinned = buildOrientation(agentStub(), cfg({ model: "grok-4.6" }), [], 1);
   assert.equal(pinned.identity.model, "grok-4.6");
   assert.match(renderOrientation(pinned), /Model pin: grok-4\.6/);
+
+  assert.equal(resolveRunningVersion(), DOCS_VERSION);
+  assert.equal(resolveRunningVersion("0.0.0"), "unknown");
+  assert.equal(resolveRunningVersion("   "), "unknown");
+  assert.equal(resolveRunningVersion(undefined), DOCS_VERSION);
+  assert.match(text, new RegExp(`Cotal v${DOCS_VERSION.replace(/\./g, "\\.")} — call cotal_docs`));
+  assert.match(text, /distinct from the MCP protocol version and any CLI binary on disk/);
+  const unknownVer = buildOrientation(agentStub(), cfg(), [], 1, "0.0.0");
+  assert.equal(unknownVer.identity.cotalVersion, "unknown");
+  assert.match(renderOrientation(unknownVer), /Cotal version: unknown \(running integration build\/version metadata is unavailable in this process/);
 }
 
 // 3 — core/more grouping covers exactly the gated set (minus orientation itself), no dupes.
@@ -354,6 +367,38 @@ const presence = (id: string, name: string, role?: string, status = "idle") => (
   }
   assert.match(stderr, /endpoint warning: bearer refresh failed - retrying/, "MeshAgent's own warning listener reaches its operator log");
   assert.equal(realAgent.connectionIssue, undefined, "a recoverable endpoint warning does not become a connection issue");
+}
+
+// 9 — MCP initialize serverInfo exposes the running Cotal integration version (#4132).
+{
+  const toServer = new PassThrough();
+  const fromServer = new PassThrough();
+  const srv = await serveGatewayStdio(
+    {
+      account: () => "acct",
+      open: async () => { throw new Error("unused"); },
+      find: async () => undefined,
+      close: async () => false,
+    },
+    { input: toServer, output: fromServer },
+  );
+  try {
+    const reply = await new Promise<{ result?: { serverInfo?: { name?: string; version?: string } } }>((resolve) => {
+      let buf = "";
+      fromServer.on("data", (c: Buffer) => {
+        buf += c.toString("utf8");
+        const nl = buf.indexOf("\n");
+        if (nl >= 0) resolve(JSON.parse(buf.slice(0, nl)));
+      });
+      toServer.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "smoke", version: "1" } } })}\n`,
+      );
+    });
+    assert.equal(reply.result?.serverInfo?.name, "cotal");
+    assert.equal(reply.result?.serverInfo?.version, DOCS_VERSION);
+  } finally {
+    await srv.close();
+  }
 }
 
 console.log("✓ orientation smoke passed");

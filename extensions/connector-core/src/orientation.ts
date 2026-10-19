@@ -14,11 +14,19 @@ import { presenceViewCondition, type MeshAgent } from "./agent.js";
 import { isAuthed, type AgentConfig } from "./config.js";
 import { DOCS_VERSION } from "./docs.js";
 
+/** Resolve the running Cotal integration version loaded in memory by the serving process.
+ *  Blank or placeholder values ("0.0.0") report "unknown" explicitly rather than guessing or
+ *  reading an external CLI executable on disk. */
+export function resolveRunningVersion(version: string | undefined = DOCS_VERSION): string {
+  const trimmed = typeof version === "string" ? version.trim() : "";
+  return trimmed.length > 0 && trimmed !== "0.0.0" ? trimmed : "unknown";
+}
+
 /** One-line connector bootstrap that points a joining agent at `cotal_orientation`. Folded into each
  *  connector's system prompt / MCP instructions so every agent — Claude Code, OpenCode, Hermes — is
  *  told to orient first, from a single source of truth. */
 export const ORIENTATION_BOOTSTRAP =
-  "Start with cotal_orientation — it shows your identity, the recorded model pin if one was set, the channels you can read and post to, " +
+  "Start with cotal_orientation — it shows your identity, the running Cotal version, the recorded model pin if one was set, the channels you can read and post to, " +
   "your capabilities, the tools available to you, and who's present.";
 
 /** Mesh-first steer, folded in alongside {@link ORIENTATION_BOOTSTRAP} for every connector. Keeps
@@ -124,6 +132,7 @@ export function buildOrientation(
   config: AgentConfig,
   visibleTools: OrientationTool[],
   generatedAt: number,
+  runningVersion: string | undefined = DOCS_VERSION,
 ): Orientation {
   const core: OrientationTool[] = [];
   const more: OrientationTool[] = [];
@@ -143,7 +152,14 @@ export function buildOrientation(
   return {
     v: 1,
     generatedAt,
-    identity: { name: config.name, role: config.role, space: config.space, id: agent.id, cotalVersion: DOCS_VERSION, ...(config.model ? { model: config.model } : {}) },
+    identity: {
+      name: config.name,
+      role: config.role,
+      space: config.space,
+      id: agent.id,
+      cotalVersion: resolveRunningVersion(runningVersion),
+      ...(config.model ? { model: config.model } : {}),
+    },
     access: {
       // AUTHENTICATED, not "has static creds": a user-auth mesh has no static creds and its grants
       // are broker-enforced, so `!!config.creds` told every agent on one that its grants were
@@ -176,11 +192,16 @@ export function renderOrientation(o: Orientation): string {
   const aclDiffers =
     o.access.readAcl.length !== o.access.read.length ||
     o.access.readAcl.some((c) => !o.access.read.includes(c));
+  const resolvedVersion = resolveRunningVersion(o.identity.cotalVersion);
+  const versionLine =
+    resolvedVersion === "unknown"
+      ? "Cotal version: unknown (running integration build/version metadata is unavailable in this process; distinct from the MCP protocol version and any CLI binary on disk) — call cotal_docs for the bundled spec, schema, and guides."
+      : `Cotal v${resolvedVersion} — call cotal_docs for the version-exact spec, schema, and guides (running integration loaded in this process; distinct from the MCP protocol version and any CLI binary on disk). ` +
+        "Consult it before answering about Cotal or writing code against it; don't rely on training memory.";
 
   const lines: string[] = [
     `You are ${who} in space "${o.identity.space}" (id ${o.identity.id.slice(0, 8)}…).`,
-    `Cotal v${o.identity.cotalVersion} — call cotal_docs for the version-exact spec, schema, and guides. ` +
-      "Consult it before answering about Cotal or writing code against it; don't rely on training memory.",
+    versionLine,
     o.identity.model
       ? `Model pin: ${o.identity.model} (from COTAL_MODEL; the harness default is not knowable from here when this line is absent).`
       : "Model pin: none recorded (COTAL_MODEL was unset; the harness default is not knowable from here).",

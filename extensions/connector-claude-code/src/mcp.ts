@@ -35,6 +35,7 @@ import {
   GATEWAY_INSTRUCTIONS,
   GATEWAY_LISTENING,
   serveGatewayStdio,
+  resolveRunningVersion,
   JsonlFileSource,
   type DurableSource,
 } from "@cotal-ai/connector-core";
@@ -389,14 +390,16 @@ async function startSession(
     throw new Error("hosted MCP input ended before startup completed");
   agent.start(); // custody is claimed before background broker connect, after control bind
 
+  const runningVersion = resolveRunningVersion();
+  const versionBanner = runningVersion === "unknown" ? "Cotal version: unknown" : `Cotal v${runningVersion}`;
   const server = new McpServer(
-    { name: "cotal", version: "0.0.0" },
+    { name: "cotal", version: runningVersion },
     {
       // `claude/channel` makes this MCP server a Claude Code *channel*: peer
       // messages can be pushed straight into the session (waking it if idle).
       capabilities: { experimental: { "claude/channel": {} } },
       instructions:
-        `You are connected to the Cotal mesh as "${config.name}"` +
+        `You are connected to the Cotal mesh (${versionBanner}) as "${config.name}"` +
         `${config.role ? ` (role: ${config.role})` : ""} in space "${config.space}". ` +
         `${ORIENTATION_BOOTSTRAP} ` +
         feedbackLine(config) +
@@ -455,7 +458,7 @@ async function startSession(
   await server.connect(transport);
 
   process.stderr.write(
-    `[cotal-connector] MCP ready (stdio) — space="${config.space}" name="${config.name}"${config.role ? ` role="${config.role}"` : ""}\n`,
+    `[cotal-connector] MCP ready (stdio) — version="${runningVersion}" space="${config.space}" name="${config.name}"${config.role ? ` role="${config.role}"` : ""}\n`,
   );
   return { name: config.name, close };
 }
