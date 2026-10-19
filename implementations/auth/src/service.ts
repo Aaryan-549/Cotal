@@ -3282,7 +3282,7 @@ function makePublicHandler(
     void (async () => {
       try {
         const route = routes.get(req.url ?? "");
-        if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /.well-known/cotal-mesh" });
+        if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-instances, /.well-known/cotal-mesh" });
         await route(req, res, ctx);
       } catch (e) {
         if (!res.headersSent) sendRequestError(res, e);
