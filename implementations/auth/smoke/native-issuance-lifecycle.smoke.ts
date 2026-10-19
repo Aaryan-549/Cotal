@@ -3,8 +3,9 @@
  * the authority plane and callout composed as deny-new.smoke.ts composes them:
  *
  *  - a memory-storage auth bucket refuses the plane open (existing bind shape proof);
- *  - a transfer-writer success records its view; a same-label re-grant refuses the predecessor's
- *    bearer with no row, and a successor (after the plane's own retirement) records disjointly;
+ *  - a transfer-writer success records its view; after the grant is revoked and the plane's own
+ *    retirement runs, the predecessor's bearer is refused with no row and a same-label successor
+ *    records disjointly;
  *  - kernel witness: the key read from the PERSISTED row of a working connection is revoked by a
  *    test-operator account claim; exactly that socket closes while a sibling keeps working (this
  *    proves the mapping only: a fresh connect on the same bearer still gets a new key);
@@ -33,6 +34,7 @@ import {
   grantManagedActor, ledgerAclResolver, newActorToken, openAuthAuthorityPlane, startAuthCallout,
 } from "../src/index.js";
 import { openAuthorityClient } from "../src/authority-client.js";
+import { revokeManagedActor } from "../src/ledger.js";
 import { readNativeIssuance } from "../src/native-issuance.js";
 import { pickFreePort } from "../../../packages/core/smoke/_free-port.js";
 import { SMOKE_BROKER_TOKEN, teardownOnSignal } from "@cotal-ai/smoke-kit";
@@ -90,10 +92,13 @@ try {
   const jsm = await jetstreamManager(setup.nc);
   await createEndpointStreams(jsm, new Kvm(setup.nc), space);
 
-  // ---- M0: memory-only auth store refuses the bind ----
+  // ---- M0: memory-only auth store refuses the bind (createEndpointStreams made the file one) ----
+  await jsm.streams.delete(`KV_${epAuthBucket(space)}`);
   await new Kvm(setup.nc).create(epAuthBucket(space), { storage: "memory" } as never);
+  const m0Storage = (await jsm.streams.info(`KV_${epAuthBucket(space)}`)).config.storage;
+  check("M0 instrument: the seeded auth bucket really is memory storage", m0Storage === "memory", m0Storage);
   let m0 = "";
-  try { await openAuthAuthorityPlane({ server: SERVERS, space, dir, identityRoot: dir, dataAccount, log: quiet, nativeIssuancePruneMs: PRUNE_MS }); m0 = "opened"; }
+  try { const p0 = await openAuthAuthorityPlane({ server: SERVERS, space, dir, identityRoot: dir, dataAccount, log: quiet, nativeIssuancePruneMs: PRUNE_MS }); await p0.close(); m0 = "opened"; }
   catch (e) { m0 = (e as Error).message; }
   check("M0 a memory-storage auth bucket refuses the plane open", m0 !== "opened" && /storage|file|memory/i.test(m0), m0.slice(0, 160));
   await jsm.streams.delete(`KV_${epAuthBucket(space)}`);
@@ -184,6 +189,7 @@ try {
   const predKeys = fresh(k0, await natkeys(kv));
   check("SU predecessor connects with one row under its uid", predNc !== "denied" && predKeys.length === 1);
   if (predNc !== "denied") await predNc.close();
+  revokeManagedActor(dir, OWNER, "seat");
   const retired = await within(plane.retireManagedLifecycle({ owner: OWNER, actor: "seat", lifecycleUid: p.uid }).then((r) => r, (e: Error) => ({ error: e.message })), 15_000);
   const retiredOk = retired !== "timeout" && !("error" in retired) && retired.retired === true;
   check("SU the plane retires the predecessor lifecycle", retiredOk, retired === "timeout" ? "timeout" : retired);
