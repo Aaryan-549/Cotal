@@ -140,7 +140,7 @@ console.log("E. the accepted readiness budget, not a shorter generic caller wait
 {
   const delayedTerminalConn = {
     flush: async () => {},
-    subscribe: (_subject: string, opts: { callback: (err: Error | null, m: { data: Uint8Array }) => void }) => {
+    subscribe: (_subject: string, opts: { callback: (err: Error | null, m: { subject: string; data: Uint8Array }) => void }) => {
       const timer = setTimeout(() => opts.callback(null, {
         subject: progressSubject("i1", 0, GOAL),
         data: new TextEncoder().encode(JSON.stringify({ goalId: GOAL, phase: "terminal", state: "succeeded", data: { name: "slow" } })),
