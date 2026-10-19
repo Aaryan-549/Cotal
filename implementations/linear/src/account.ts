@@ -46,11 +46,13 @@ export function storedTokenPath(name: string): string {
   return join(linearDir(), `${name}.token`);
 }
 
-/** Refuse a credential file that another user could read or that is not a regular file. */
+/** Refuse a credential file that another user could read or that is not a regular file. POSIX mode
+ *  bits do not map onto Windows ACLs (every file reads as 666 there), so the mode check applies where
+ *  the concept exists; on win32 a secret's privacy is the ACL `writeSecretFileAtomic` sets at write. */
 export function assertPrivateFile(path: string): void {
   const st = statSync(path);
   if (!st.isFile()) throw new Error(`${path} is not a regular file`);
-  if ((st.mode & 0o077) !== 0) throw new Error(`${path} is readable by other users (mode ${(st.mode & 0o777).toString(8)}); chmod 600 it`);
+  if (process.platform !== "win32" && (st.mode & 0o077) !== 0) throw new Error(`${path} is readable by other users (mode ${(st.mode & 0o777).toString(8)}); chmod 600 it`);
 }
 
 export function saveAccount(account: LinearAccount, token?: string): void {
