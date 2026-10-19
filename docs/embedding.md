@@ -360,6 +360,8 @@ requires a current same-owner interactive holder and managed target, and caps th
 24 hours. It returns only `{ consent }`, after a create-only `consent.<id>` auth-store write.
 Duplicate ids refuse. A failed or lost acknowledgement returns no consent and never retries.
 The host must not label an unknown outcome completed or resubmit it automatically.
+Only the auth mint writer holds consent-KV publish authority. The environment admission writer
+and remote manager issuer do not inherit that grant. Create-only enforcement remains in the recorder.
 
 This door is absent from the public face. Without the opt-in signer it answers unavailable.
 It installs no serving material, revocation store, caller view, capture or result reader.

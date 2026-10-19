@@ -56,7 +56,7 @@ export const AUTHORITY_CLIENT_TTL_SEC = 15 * 60;
  * rows — it is the ISSUANCE AUTHORITY, that authority is exactly what it holds; and every raw
  * MSG.GET/DIRECT.GET profile carries the caller-selected-reply injection class.
  */
-export function authorityWriterGrants(space: string, connId: string): { publish: string[]; subscribe: string[] } {
+function baseAuthorityWriterGrants(space: string, connId: string): { publish: string[]; subscribe: string[] } {
   const auth = `KV_${epAuthBucket(space)}`;
   const records = `KV_${recordsBucket(space)}`;
   // Same connId hygiene as authConnectReaderGrants: the only untrusted subject-forming input goes
@@ -78,7 +78,6 @@ export function authorityWriterGrants(space: string, connId: string): { publish:
       `$KV.${epAuthBucket(space)}.cred.>`,
       `$KV.${epAuthBucket(space)}.bysrc.>`,
       `$KV.${epAuthBucket(space)}.natkey.>`,
-      `$KV.${epAuthBucket(space)}.consent.*`,
       `$KV.${recordsBucket(space)}.lifecycle.>`,
       `$KV.${recordsBucket(space)}.uid.>`,
     ],
@@ -86,10 +85,16 @@ export function authorityWriterGrants(space: string, connId: string): { publish:
   };
 }
 
+/** Only the auth mint writer records consents. Derived host writers use the shared base without it. */
+export function authorityWriterGrants(space: string, connId: string): { publish: string[]; subscribe: string[] } {
+  const base = baseAuthorityWriterGrants(space, connId);
+  return { publish: [...base.publish, `$KV.${epAuthBucket(space)}.consent.*`], subscribe: base.subscribe };
+}
+
 /** Host-private environment reservation writer. It adds manager gates and multi-segment operation
  * staging, never session release pins or a guest credential. */
 export function environmentManagerAdmissionWriterGrants(space: string, connId: string): { publish: string[]; subscribe: string[] } {
-  const base = authorityWriterGrants(space, connId);
+  const base = baseAuthorityWriterGrants(space, connId);
   return {
     publish: [...base.publish,
       `$KV.${epAuthBucket(space)}.epgate.manager.>`,
@@ -113,7 +118,7 @@ export function environmentManagerAdmissionIndexGrants(space: string, connId: st
  * needed by the typed manager-service protocol. It carries no generic profile/mint endpoint; the
  * HTTP handler chooses fixed profiles and caller-generated nkeys. */
 export function remoteManagerIssuerGrants(space: string, connId: string): { publish: string[]; subscribe: string[] } {
-  const base = authorityWriterGrants(space, connId);
+  const base = baseAuthorityWriterGrants(space, connId);
   const admission = `KV_${admissionBucket(space)}`;
   return {
     publish: [
