@@ -1387,7 +1387,8 @@ export class MeshHandler {
     // of spawn are one path — the terminal is read under the bound goal, the handle comes from it,
     // a resume re-reads it, and a discharge despawns by it — so the hand-over is spent exactly
     // once and this step never mints a second seat for a persona it was handed one for.
-    const adopted = ext === undefined ? this.adoptable.get(req.persona)?.shift() : undefined;
+    const adoptions = ext === undefined ? this.adoptable.get(req.persona) : undefined;
+    const adopted = adoptions?.[0];
     if (adopted !== undefined) {
       const handle = adopted.result as AgentHandleValue | undefined;
       const floor = adopted.external as Readonly<Record<string, unknown>> | undefined;
@@ -1396,6 +1397,8 @@ export class MeshHandler {
       if (req.worktree !== undefined && handle.worktree !== req.worktree)
         throw new Error(`spawn(${req.persona}) asks for worktree "${req.worktree}" but the seat the migration hands it holds ${handle.worktree === undefined ? "none" : `"${handle.worktree}"`}; an adopted seat keeps its tree, so the edited program names that tree or none`);
       checkRecordedPlacement(floor);
+      // Refused validation leaves the hand-over queued; claim it before the first await.
+      adoptions!.shift();
       ext = {
         goalId: adopted.requestId,
         ...(floor !== undefined ? pickAcceptanceFloor(floor) : {}),

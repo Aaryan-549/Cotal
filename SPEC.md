@@ -4894,6 +4894,7 @@ that host unreachable (L4002). Permission and contract refusals retain their own
 reply lost after submission remains governed by goal reconciliation.
 A migration keeps the original seat's recorded host through its new binding and later takeover.
 A receiving placement request cannot move that seat or invent a host missing from older records.
+Refusing that placement leaves the kept hand-over available for a later valid spawn.
 
 ### 14.2 The language and its version
 
