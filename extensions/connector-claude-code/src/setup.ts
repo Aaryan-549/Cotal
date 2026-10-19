@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,8 +131,20 @@ function materialize(name: string, root: string, assets: readonly string[], vers
   }
 }
 
+/** `claude plugin list --json` keeps a record for every project an install was ever made in: 1.2 MB for
+ *  1,782 records on one machine, past spawnSync's 1 MiB default, which cuts the output short and still
+ *  reports exit 0. */
+const CLAUDE_OUTPUT_LIMIT = 64 * 1024 * 1024;
+
 function command(...args: string[]): { status: number | null; output: string } {
-  const result = spawnSync("claude", args, { encoding: "utf8" });
+  return commandIn(process.cwd(), ...args);
+}
+
+/** A spawn error (output past the limit, a directory that cannot be entered) is a failure whatever the
+ *  exit status says, and its message is the output. */
+function commandIn(cwd: string, ...args: string[]): { status: number | null; output: string } {
+  const result = spawnSync("claude", args, { cwd, encoding: "utf8", maxBuffer: CLAUDE_OUTPUT_LIMIT });
+  if (result.error) return { status: null, output: result.error.message };
   return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() };
 }
 
@@ -190,11 +202,11 @@ function writeMarketplace(): void {
   if (update.status !== 0) throw new Error(`plugin marketplace update failed:\n${update.output}`);
 }
 
-/** Every installed plugin, as `claude plugin list --json` reports it. It lists local-scope installs of
- *  every project, each with its `projectPath`, but `enabled` says whether the plugin is enabled in the
- *  directory it runs in, not in the install's own project. */
-function listPlugins(): PluginEntry[] {
-  const result = command("plugin", "list", "--json");
+/** Every installed plugin, as `claude plugin list --json` reports it from `cwd`. It lists local-scope
+ *  installs of every project, each with its `projectPath`, but `enabled` says whether the plugin is
+ *  enabled in `cwd`, not in the install's own project. */
+function listPlugins(cwd = process.cwd()): PluginEntry[] {
+  const result = commandIn(cwd, "plugin", "list", "--json");
   if (result.status !== 0) throw new Error(`plugin list failed:\n${result.output}`);
   let entries: unknown;
   try {
@@ -206,21 +218,11 @@ function listPlugins(): PluginEntry[] {
   return entries as PluginEntry[];
 }
 
-const samePath = (a: unknown, b: string): boolean => {
-  if (typeof a !== "string") return false;
-  try {
-    return realpathSync(a) === realpathSync(b);
-  } catch {
-    return false;
-  }
-};
-
-/** A local-scope install is this directory's, and is listed from here, where `enabled` describes it. */
+/** Reads the install from Cotal's home, which no project's settings cover, so a project that turns the
+ *  plugin off for itself does not fail a user-scope install that succeeded. */
 function verify(name: string, scope: string, expectedVersion?: string): void {
-  const match = listPlugins().find(
-    (entry) => entry.id === `${name}@${MARKETPLACE}` && entry.scope === scope && (scope !== "local" || samePath(entry.projectPath, process.cwd())),
-  );
-  const where = `${scope} scope${scope === "local" ? `, ${process.cwd()}` : ""}`;
+  const match = listPlugins(cotalHome()).find((entry) => entry.id === `${name}@${MARKETPLACE}` && entry.scope === scope);
+  const where = `${scope} scope`;
   if (!match) throw new Error(`plugin ${name}@${MARKETPLACE} (${where}) is not installed`);
   if (match.enabled !== true || (match as { errors?: unknown[] }).errors?.length)
     throw new Error(`plugin ${name}@${MARKETPLACE} (${where}) did not load: ${JSON.stringify({ enabled: match.enabled, errors: match.errors })}`);
@@ -239,12 +241,34 @@ function install(name: string, scope: string, expectedVersion?: string): void {
   verify(name, scope, expectedVersion);
 }
 
+/** Removes the per-project installs of the `cotal` plugin that earlier releases made, once the user-scope
+ *  install covers every project. Each is removed from its own project, where Claude Code keeps its
+ *  record. A project path that is no longer a directory has no settings left to enable the plugin, so
+ *  its record is left as it is. A project Claude Code cannot change does not stop the others; setup
+ *  then fails naming each one. Returns how many it removed. */
+function retireProjectInstalls(): number {
+  let removed = 0;
+  const failed: string[] = [];
+  for (const entry of listPlugins()) {
+    if (entry.id !== `cotal@${MARKETPLACE}` || entry.scope !== "local" || typeof entry.projectPath !== "string") continue;
+    if (!statSync(entry.projectPath, { throwIfNoEntry: false })?.isDirectory()) continue;
+    const result = commandIn(entry.projectPath, "plugin", "uninstall", `cotal@${MARKETPLACE}`, "--scope", "local");
+    if (result.status === 0) removed += 1;
+    else failed.push(`${entry.projectPath}: ${result.output}`);
+  }
+  if (failed.length)
+    throw new Error(
+      `cotal@${MARKETPLACE} is installed at user scope, but ${failed.length} earlier per-project install${failed.length === 1 ? "" : "s"} could not be removed. In each directory, run \`claude plugin uninstall cotal@${MARKETPLACE} --scope local\`:\n${failed.join("\n")}`,
+    );
+  return removed;
+}
+
 
 /** The installed Claude Code plugins, or undefined when Claude cannot be launched or queried (both of
  *  which status renders as "unknown" rather than "absent"). ONE spawn serves both rows. */
 function pluginList(): PluginEntry[] | undefined {
-  const result = spawnSync("claude", ["plugin", "list", "--json"], { encoding: "utf8" });
-  if (result.status !== 0) return undefined;
+  const result = spawnSync("claude", ["plugin", "list", "--json"], { encoding: "utf8", maxBuffer: CLAUDE_OUTPUT_LIMIT });
+  if (result.error || result.status !== 0) return undefined;
   try {
     const parsed: unknown = JSON.parse(result.stdout || "[]");
     return Array.isArray(parsed) ? (parsed as PluginEntry[]) : undefined;
@@ -283,6 +307,7 @@ function pluginRow(entries: PluginEntry[] | undefined, { version }: ConnectorSta
     materialized = undefined;
   }
   if (typeof materialized !== "string" || !materialized.startsWith(`${version}+`)) return row("warn", "stale · run `cotal setup`");
+  if (installs.some((entry) => entry.scope === "user")) return row("ok", "current (user scope)");
   return row("ok", `current (${installs.length} install${installs.length === 1 ? "" : "s"})`);
 }
 
@@ -327,13 +352,16 @@ export const claudeSetupProvider: ConnectorSetupProvider = {
   connector: {
     name: "claude-plugin",
     title: "Install the Claude Code plugin",
-    explain: "Lets a Claude Code session join the web and wake on peer messages.",
+    explain: "Lets every Claude Code session on this machine join the web and wake on peer messages.",
     context: [DOCS_URL],
     run({ cotal }) {
       materializeCotal(cotal);
-      install("cotal", "local");
+      install("cotal", "user");
+      // Desktop first: a per-project install that cannot be removed fails the step after it.
       const app = desktop(cotal, true);
-      return `cotal@${MARKETPLACE} (local scope)${app ? `; ${app}` : ""}`;
+      const removed = retireProjectInstalls();
+      const replaced = removed ? `, replacing ${removed} project install${removed === 1 ? "" : "s"}` : "";
+      return `cotal@${MARKETPLACE} (user scope${replaced})${app ? `; ${app}` : ""}`;
     },
   },
   refresh: {
