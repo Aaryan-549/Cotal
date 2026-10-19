@@ -258,7 +258,9 @@ try {
   // WORKTREE's connector into the sandbox prefix, never the operator store.
   const extAdd = await cotal(["ext", "add", CLAUDE]);
   check("sandbox ext add of the worktree claude connector succeeds", extAdd.status === 0, extAdd.out);
-  const overSpawn = await cotal(["spawn", "probe", "--allow-subscribe", "ops.wide", "--space", SPACE]);
+  // The read list keeps the persona's own `general` (a spawn whose list omits a channel its persona
+  // subscribes to is refused on that alone), so `ops.wide` is the only ask beyond the cli grant.
+  const overSpawn = await cotal(["spawn", "probe", "--allow-subscribe", "general,ops.wide", "--space", SPACE]);
   check("the envelope: a foreground spawn beyond the cli grant is refused (delegation only narrows)",
     overSpawn.status !== 0 && overSpawn.out.includes("delegation only narrows"), overSpawn.out);
   check("…naming the exact widening re-grant", overSpawn.out.includes("cotal actor grant cli --owner"), overSpawn.out);
