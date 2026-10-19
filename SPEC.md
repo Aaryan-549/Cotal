@@ -3792,6 +3792,13 @@ Neither these profiles nor their authority caller rows may be issued through ord
 human or platform-control registration. Tests MUST attempt raw broker writes and auth-store
 scans with every guest credential, not merely pass them through trusted-path parsers.
 
+**Manager status metadata.** The Manager `status` contract permits optional string fields
+`host` and `version`. The stock Manager emits its answering process's host name and its own
+running `@cotal-ai/manager` package version, captured at module load. These fields are advisory
+only and MUST NOT grant authority, select a route or determine placement. Callers MUST use
+verified responder attribution for instance identity and accept payloads that omit either field
+without inferring a value from the broker, browser, presence or service registry.
+
 **Platform readiness read.** A platform composition learns whether its assigned control manager
 instance is serving through the auth context's readiness read. The trusted auth process answers over
 its own self-minted reader connection and hands out neither that connection nor its credential. The

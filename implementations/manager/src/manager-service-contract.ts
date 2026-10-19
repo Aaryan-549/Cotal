@@ -64,6 +64,10 @@ const STATUS_OUTPUT_SCHEMA = {
   properties: {
     /** The manager's stable service instance id (its per-process incarnation uid). */
     instanceId: { type: "string" },
+    /** Answering Manager's host name. Advisory display metadata, never routing authority. */
+    host: { type: "string" },
+    /** Running @cotal-ai/manager package version. Optional for older status payloads. */
+    version: { type: "string" },
     execution: { enum: ["runtime", "none"] },
     /** The runtime kind serving agents (pty/tmux/cmux/orca/herdr). */
     runtime: { type: "string" },
@@ -147,6 +151,10 @@ const STATUS_OUTPUT_SCHEMA = {
 /** The typed shape a `status` invocation returns (the compiled output contract validates it). */
 export interface ManagerStatus {
   instanceId: string;
+  /** Answering Manager's host name. Advisory only; older payloads may omit it. */
+  host?: string;
+  /** Running @cotal-ai/manager package version. Older payloads may omit it. */
+  version?: string;
   execution: "runtime" | "none";
   runtime: string;
   custody: "legacy" | "custodied" | "none";
@@ -1036,7 +1044,7 @@ export function managerClusterDocument(): {
 } {
   return {
     urn: MANAGER_CLUSTER_URN,
-    revision: 27,
+    revision: 28,
     attributes: [],
     events: [],
     commands: ROWS.map((r) => ({
