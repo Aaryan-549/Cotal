@@ -228,7 +228,11 @@ the whole id, because both surfaces take nothing else.
 On a user-auth mesh, manager commands obtain a short-lived `manager-caller` view from the
 exchange. It authorizes one concrete manager instance using the caller's current actor grant and
 the host's registered service records. Discovery and invocation both use that instance's `inst`
-route. This view grants no registry scan, class queue, or additional command capability. An absent,
+route. This view grants no registry scan or class queue. It adds no command capability except the
+three reads a launch needs: a view whose actor holds `spawn` may call `status`, `models` and
+`resolve-cwd` on that instance. A `run`-only or no-scope view may not, and `ps` and `slots` stay with
+`admin`. A user mesh's co-located manager answers every owner's view, so its `status` counts only the
+caller's own seats, as `ps` would list them, unless the caller holds `admin`. An absent,
 ambiguous or unauthorized selection refuses before the command is sent. An ambiguous one lists the
 owner's live manager instance ids and names the caller's way to pick one: `--on <instanceId>` for
 the CLI, `--manager-instance <instanceId>` for `cotal agent-bearer --manager-call`, and the

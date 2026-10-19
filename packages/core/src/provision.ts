@@ -1607,6 +1607,13 @@ export function permissionsFor(
   return { pub: { allow: pubAllow, deny: pubDeny }, sub: { allow: [inbox, deliveryReplies, ...livenessReplies, ...subChat, ...epSub] } };
 }
 
+/** The reads a launch on one Manager needs: `status` (its execution mode and which connectors it
+ * can launch), `models` (their catalogs) and `resolve-cwd` (a directory's canonical form on its
+ * host). A spawn holder learns each by launching there, so a spawn-scoped manager-caller view
+ * carries them on its one pinned instance. The standing spawn set does not: it reaches every
+ * manager in the space through the class rail. */
+const LAUNCH_READ_COMMANDS = Object.freeze(["status", "models", "resolve-cwd"] as const);
+
 /** One seat's manager control view. It carries no agent messaging or delivery surface, and every
  * manager request, including describe, is pinned to one exact registered instance. */
 function managerCallerPermissions(space: string, pr: MintPrincipal, opts: MintOpts): Record<string, unknown> {
@@ -1620,6 +1627,7 @@ function managerCallerPermissions(space: string, pr: MintPrincipal, opts: MintOp
     { endpoint: BASELINE_LIFECYCLE_ENDPOINT, command: "describe" },
     ...baselineCallerCapabilities().filter((cap) => cap.endpoint === BASELINE_LIFECYCLE_ENDPOINT),
     ...(caps.includes("spawn") ? spawnCallerCapabilities(pr.owner) : []),
+    ...(caps.includes("spawn") ? LAUNCH_READ_COMMANDS.map((command) => ({ endpoint: BASELINE_LIFECYCLE_ENDPOINT, command })) : []),
     ...(caps.includes("run") ? runCallerCapabilities(pr.owner) : []),
     ...(caps.includes("admin") ? operatorInstrumentCapabilities("admin", pr.owner) : []),
   ];

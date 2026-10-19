@@ -3758,7 +3758,9 @@ export class Manager {
       return a;
     };
     return managerCommandDefs({
-      status: (ctx) => this.serveGated(ctx, () => this.managerStatusData()),
+      // A remote Manager files every seat under its own owner, so only a user mesh's shared local
+      // Manager narrows the count, and status never waits on a remote admin check.
+      status: (ctx) => this.serveGated(ctx, async () => this.managerStatusData(this.remoteAuthority ? undefined : await this.psOwnerFilter(ctx.subject.caller, false))),
       ps: (ctx) => this.serveGated(ctx, async () => this.list(await this.psOwnerFilter(ctx.subject.caller, false))),
       inspect: (ctx) => this.serveGated(ctx, async () => {
         const name = String(args(ctx).name ?? "").trim();
@@ -7686,8 +7688,10 @@ export class Manager {
     }
   }
 
-  /** The served manager-level health summary. */
-  private managerStatusData(): ManagerStatus {
+  /** The served manager-level health summary. Given an owner, `agentCount` counts only that owner's
+   *  seats, as `ps` lists them ({@link psOwnerFilter}), so a person reading a shared Manager does not
+   *  learn how many seats other owners hold on it. */
+  private managerStatusData(ownerFilter: string | undefined): ManagerStatus {
     return {
       instanceId: this.managerInstanceId,
       execution: this.execution,
@@ -7695,7 +7699,7 @@ export class Manager {
       custody: this.execution === "none" ? "none" : this.requiredRuntime.kind === "pty" && this.requiredRuntime.supportsRelease === true ? "custodied" : "legacy",
       runHosting: this.execution !== "none" && (this.remoteAuthority ? this.remoteAuthority.runHosting !== undefined : !this.userMode && this.auth !== undefined),
       terminalSessions: this.execution !== "none",
-      agentCount: this.agents.size,
+      agentCount: ownerFilter === undefined ? this.agents.size : [...this.agents.values()].filter((a) => a.userOwner === ownerFilter).length,
       uptimeMs: Date.now() - this.startedAtMs,
       connectors: this.connectorStatuses.map((row) => ({ ...row, binaries: { ...row.binaries } })),
       classSpawn: this.classSpawnEnabled(),

@@ -270,8 +270,9 @@ the pinned JWKS, issuer, and audience. An agent presents its spawn-time actor to
 match a fresh managed-ledger row. The public face mints two elevated views, both still gated on
 ledger scope `admin`: `channel-writer` (`cotal channels set/default`) and `channel-purger` (the
 dashboard's per-click channel delete). It also mints the narrowing `manager-caller` view for humans
-or managed agents. That view adds no capability and binds the bearer to one live registered manager
-instance. God-view (`admin`), space-history `purger`, `deployer`, and `manager-service` stay
+or managed agents. That view binds the bearer to one live registered manager instance. It adds no
+capability, except that a `spawn` holder's view may read that manager's `status`, `models` and
+`resolve-cwd`, which a launch there needs. God-view (`admin`), space-history `purger`, `deployer`, and `manager-service` stay
 loopback-only. A managed-agent secret exchange refuses every other view. This is not full remote channel management: `cotal web` still
 mints the read-only admin view at startup, so a remote dashboard that needs that god-view still
 fails even when a later delete would mint `channel-purger`.
