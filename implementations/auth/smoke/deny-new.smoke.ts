@@ -129,6 +129,7 @@ try {
     dataAccount,
     space,
     token: { key: issuer.localKeySet(), issuer: ISS },
+    recordIssuance: plane.recordIssuance,
     authorizeActor: plane.authorizeConnect,
     permissionsFor: calloutPermissions(ledgerAclResolver(dir)),
     log: quiet,

@@ -247,6 +247,13 @@ export function assertSourceChain(v: unknown, what: string): string[] {
 export function credRowKey(lifecycleUid: string, credentialId: string): string {
   return `cred.${assertLifecycleToken(lifecycleUid)}.${assertCredentialIdTail(credentialId, "credentialId")}`;
 }
+/** The native-issuance evidence key `natkey.<userNkey>` (SPEC 13.1): `userNkey` is the broker-generated
+ *  per-connection user public key of one callout success, never a client nonce or display label. */
+export function nativeIssuanceKey(userNkey: string): string {
+  if (typeof userNkey !== "string" || !/^U[A-Z2-7]{55}$/.test(userNkey))
+    throw new EpEnvelopeError("failed-precondition", `natkey: ${JSON.stringify(userNkey)} is not a broker user public key (SPEC 13.1)`);
+  return `natkey.${userNkey}`;
+}
 /** The endpoint-family ledger key `epcred.<endpoint>.<instanceId>.<credentialId>` (disjoint by
  *  explicit prefix, never arity, SPEC 13.1). */
 export function epcredRowKey(endpoint: string, instanceId: string, credentialId: string): string {

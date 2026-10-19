@@ -45,8 +45,9 @@ export const AUTHORITY_CLIENT_TTL_SEC = 15 * 60;
  *    record reads), and records `DIRECT.GET` (the records bucket is Direct-capable and its KV
  *    reads here only feed revision-pinned CASes, which a stale read LOSES — fail-closed).
  *  - `$KV` writes on EXACTLY the issuance keys: auth `gate.` / `cred.` / `bysrc.` (the gate CAS
- *    fence and the mint's rows) and records `lifecycle.` / `uid.` (the alias head and the
- *    space-global uid reservation). No `srcgate.`/`stage.`/`session.` writes: root issuance
+ *    fence and the mint's rows), auth `natkey.` (the callout's create-only native-key issuance
+ *    evidence) and records `lifecycle.` / `uid.` (the alias head and the space-global uid
+ *    reservation). No `srcgate.`/`stage.`/`session.` writes: root issuance
  *    presents no handles and runs no takeover; barriers are NOT this credential's job.
  *
  * Named residuals (D32 class, not pretend-confined): `STREAM.MSG.GET` is body-selected, so this
@@ -76,6 +77,7 @@ export function authorityWriterGrants(space: string, connId: string): { publish:
       `$KV.${epAuthBucket(space)}.gate.>`,
       `$KV.${epAuthBucket(space)}.cred.>`,
       `$KV.${epAuthBucket(space)}.bysrc.>`,
+      `$KV.${epAuthBucket(space)}.natkey.>`,
       `$KV.${recordsBucket(space)}.lifecycle.>`,
       `$KV.${recordsBucket(space)}.uid.>`,
     ],
