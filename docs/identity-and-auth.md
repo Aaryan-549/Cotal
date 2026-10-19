@@ -264,7 +264,8 @@ under a host-custodied scoped anchor. It returns no result content, private key 
 [embedding.md](embedding.md) documents these host doors' contracts.
 
 The public listener has a closed surface: `GET /health`, `GET /jwks`, `POST /exchange`,
-`POST /manager-service-authority`, and `GET /.well-known/cotal-mesh`; every other path is 404. It
+`POST /manager-service-authority`, `POST /manager-instances`, and `GET /.well-known/cotal-mesh`;
+every other path is 404. It
 does **not** require the loopback
 capability. That capability proves same-uid access to a 0600 local file and has no remote meaning;
 on the public face the credential is the proof. A human presents an EdDSA IdP JWT checked against
