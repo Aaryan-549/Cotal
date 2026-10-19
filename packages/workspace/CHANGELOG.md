@@ -1,5 +1,41 @@
 # @cotal-ai/workspace
 
+## 0.86.0
+
+### Patch Changes
+
+- 1dd5baf: A control command run without `--space` now probes the registered brokers once per resolve. Before this, the control resolver probed every non-catalog record for its mode check, and the connect helper probed them all again before it chose the target; `cotal update`'s manager continuity check added a third round of probes. Each round could wait out the confirming timeout on a record that did not answer, and a broker that started or stopped between rounds could leave the mode check and the connect resolving different targets. `ConnectFlags` now carries the sweep's `offline` set, and `resolveControlTarget`, `resolveTargetOrThrow`, `connectOrThrow`, `connectUserControlOrThrow` and their exiting forms read it instead of sweeping again. A named `--space` still skips the sweep.
+- 8d97d8a: Callers can name a manager instance wherever a user-auth mesh with several live managers for one owner asks them to. `cotal models` and every hosted `cotal run` verb take `--on <instance>`, and MCP `cotal_run` and `cotal_personas` take an `instance` argument under the same rules as `cotal_spawn`'s. A `cotal` command run from a managed seat's shell now selects the manager that launched the seat (`COTAL_MANAGER_INSTANCE`), as the seat's tools already did, unless `--on` names another. The ambiguity refusal still refuses, and now lists the owner's live manager instance ids and names the caller's own remedy: `--on <instanceId>` for the CLI, the `instance` argument for an agent's tools. Before, it named `--manager-instance`, which only `cotal agent-bearer` takes, so none of these callers could answer it.
+- 958e6cb: `cotal_roster`, `cotal ps`, `cotal status`, `cotal endpoints`, `cotal console` and `cotal join` print each peer's condition code and activity on one line and at most 200 characters. A control character or Unicode line separator shows as a `\uXXXX` escape, so a peer can no longer split its row into what reads as a second roster entry, pass terminal control bytes through, or flood every row with a 4000-character activity. The rule is `presenceText` in `@cotal-ai/core`, and `oneLine` moved there from `@cotal-ai/workspace`, which still re-exports it.
+- ee42687: The seed reconcile reads a built-in's `package.json` once per check. `installedExtensionPackage` returns the installed version and declared `main` from that one read, with the error policy `installedExtensionVersion` already had, and the entry-file check takes `main` from it. The check used to parse the file a second time and treat any failure of that read as a missing entry file, so a permission error there made `cotal ext seed --repair` silently reinstall the built-in, or report a torn install while the entry file existed. A read failure now surfaces as the error it is.
+- 3c0a830: The comment on the `space add` second-tenant refusal and the P7/P1 design note now name `ensureRootForSpace` in the CLI's `up` command as the root-pin refusal. They used to cite it as `up.ts:2233`, and that line had drifted onto an unrelated interface field. No behavior changes.
+- 4f49cea: A stray `space.<key>`, `account.<key>.json`, `manager.<key>.pid` or `delivery.<key>.pid` whose key decodes to `.` or `..` is now treated like any other name the workspace did not write. `spaceFromSegment` returns undefined, `accountInventory` lists the file under `corrupt`, and `recordedRuntimeSpaces` skips it, where each used to throw "cannot name a space" and `cotal status` printed that error as a hint. The three decoders now share one exported `spaceFromKey`.
+- 1eaf6e3: `cotal status --components` now names the HTTP status when the web dashboard's address answers `/api/meta` with a status outside 2xx, such as `HTTP 401`. It used to read the body first, so a plain-text or empty refusal printed `http not answered`. The status row and `cotal web --detach` now send one shared readiness request from `@cotal-ai/workspace` and read its answer the same way. That request no longer follows a redirect, so the readiness header goes only to the recorded address and a 3xx answer is reported as its status, such as `HTTP 302`, where both used to follow it and accept the identity the redirect target answered with.
+- 3b93aa2: The pre-hex record sweep that runs when a mesh is recorded or removed now throws any error listing the registry directory other than ENOENT. Before, the sweep read every listing failure as an absent registry, so a removal could return while a pre-hex record of the same space stayed behind and listed the mesh again. An absent registry directory still has nothing to sweep.
+- Updated dependencies [598d0dd]
+- Updated dependencies [be2c0d8]
+- Updated dependencies [140c0d4]
+- Updated dependencies [1d92ef7]
+- Updated dependencies [91663dc]
+- Updated dependencies [31dccc4]
+- Updated dependencies [15043fa]
+- Updated dependencies [1fd3cb4]
+- Updated dependencies [fba88b0]
+- Updated dependencies [b7f4af7]
+- Updated dependencies [7a2c574]
+- Updated dependencies [664e9df]
+- Updated dependencies [830d66b]
+- Updated dependencies [516c8f6]
+- Updated dependencies [00f631a]
+- Updated dependencies [ab30526]
+- Updated dependencies [df063ef]
+- Updated dependencies [958e6cb]
+- Updated dependencies [d4a745f]
+- Updated dependencies [6d5462d]
+- Updated dependencies [c2e7648]
+- Updated dependencies [12344fb]
+  - @cotal-ai/core@0.86.0
+
 ## 0.85.0
 
 ### Patch Changes
