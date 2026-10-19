@@ -9,9 +9,10 @@
  * that do not write it, and static (non-callout) JWTs have no row and are never inferred.
  */
 import type { KV } from "@nats-io/kv";
+import type { MsgRequest } from "@nats-io/jetstream";
 import { fromPublic } from "@nats-io/nkeys";
-import { nativeIssuanceKey } from "@cotal-ai/core";
-import type { ValidatedUserToken } from "./token.js";
+import { epAuthBucket, nativeIssuanceKey } from "@cotal-ai/core";
+import { CLOCK_TOLERANCE_SEC, type ValidatedUserToken } from "./token.js";
 import { registryStores, type LifecycleRegistry } from "./lifecycle-registry.js";
 
 /** The closed v1 record. `connId` is the client's inbox nonce: an attribute, never an identity. */
@@ -99,4 +100,34 @@ export async function readNativeIssuance(kv: KV, userNkey: string): Promise<Nati
   const entry = await kv.get(assertUserNkey(userNkey));
   if (!entry || entry.operation !== "PUT") return undefined;
   return parseNativeIssuanceRecord(entry.json());
+}
+
+/**
+ * Remove the rows whose minted JWT expired more than the clock tolerance ago (a session-caller's
+ * row carries its grant's expiry, so it lives as long as that grant). The walk is the leader-served
+ * `STREAM.MSG.GET` `next_by_subj` read over `natkey.` (no consumer: none may be created on the auth
+ * bucket), and each removal is a KV purge pinned to the exact sequence read. A row that does not
+ * parse throws: corrupt evidence is the caller's fault to surface, never a skipped row. A purge
+ * leaves the stock subject-only purge marker.
+ */
+export async function pruneNativeIssuance(registry: LifecycleRegistry, nowSec: number): Promise<{ live: number; pruned: number }> {
+  const { authKv, jsm, space } = registryStores(registry);
+  const bucket = epAuthBucket(space);
+  const prefix = `$KV.${bucket}.`;
+  let seq = 1, live = 0, pruned = 0;
+  for (;;) {
+    const m = await jsm.streams.getMessage(`KV_${bucket}`, { seq, next_by_subj: `${prefix}natkey.>` } as unknown as MsgRequest);
+    if (!m) break;
+    seq = m.seq + 1;
+    const op = m.header?.get("KV-Operation");
+    if (op === "DEL" || op === "PURGE") continue;
+    const key = m.subject.slice(prefix.length);
+    if (assertUserNkey(key.slice("natkey.".length)) !== key) throw new Error(`natkey: stored subject ${JSON.stringify(m.subject)} is not a natkey row`);
+    const record = parseNativeIssuanceRecord(m.json());
+    if (record.exp + CLOCK_TOLERANCE_SEC < nowSec) {
+      await authKv.purge(key, { previousSeq: m.seq });
+      pruned++;
+    } else live++;
+  }
+  return { live, pruned };
 }

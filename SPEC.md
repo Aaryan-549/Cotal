@@ -1345,9 +1345,14 @@ session-caller's is its grant's). An existing row for the key, under any lifecyc
 the write the responder re-reads the lifecycle and credential authority in the same stream; only
 then may the JWT leave. Any failure is a signed deny. A row is evidence of an issuance, not proof
 that a client received the JWT or that the broker accepted the connection: a write that landed
-before a refusal stays. `natkey.` is not a ledger family and authorizes nothing; a row may be
-removed only after its `exp` plus the clock tolerance. Connections admitted before this row
-existed, responders that do not write it, and static (non-callout) JWTs have no row.
+before a refusal stays. `natkey.` is not a ledger family and authorizes nothing. The issuing
+service removes a row only after its `exp` plus the clock tolerance, at boot and then on its own
+timer, walking the family with the leader-served `STREAM.MSG.GET` `next_by_subj` read (never a
+consumer) and purging each row pinned to the sequence it read; the stock purge marker stays. A row
+that does not parse fails the boot open or fences the running service. Connections admitted
+before this row existed, responders that do not write it, and static (non-callout) JWTs have no
+row. This evidence names keys; it does not by itself stop a still-authorized bearer from
+connecting again under a fresh key.
 
 **Remote manager-service authority (user-auth only).** `manager-service` is one CLOSED,
 server-authored authority view, not a profile name, arbitrary bearer profile, or client-supplied
