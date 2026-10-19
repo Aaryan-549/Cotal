@@ -623,6 +623,7 @@
     "smoke:join-dial-entry": "tsx implementations/cli/smoke/join-dial-entry.smoke.ts",
     "smoke:join-denial-guidance": "tsx implementations/cli/smoke/join-denial-guidance.smoke.ts",
     "smoke:join-external:live": "tsx implementations/cli/smoke/join-external-broker-live.smoke.ts",
+    "smoke:join-durable-dedup:live": "tsx implementations/cli/smoke/join-durable-dedup-live.smoke.ts",
     "smoke:app-identity:live": "tsx implementations/cli/smoke/app-identity-live.smoke.ts",
     "smoke:claude-local:live": "tsx extensions/connector-claude-code/smoke/local-server-live.smoke.ts",
     "smoke:claude-desktop-config": "tsx extensions/connector-claude-code/smoke/desktop-config.smoke.ts",
