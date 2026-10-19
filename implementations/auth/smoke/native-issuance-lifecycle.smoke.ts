@@ -3,9 +3,8 @@
  * the authority plane and callout composed as deny-new.smoke.ts composes them:
  *
  *  - a memory-storage auth bucket refuses the plane open (existing bind shape proof);
- *  - a transfer-writer success records its view; after the grant is revoked and the plane's own
- *    retirement runs, the predecessor's bearer is refused with no row and a same-label successor
- *    records disjointly;
+ *  - a transfer-writer success records its view (retirement and a same-name successor need the
+ *    delivery-admin eviction rail, so they live in native-issuance-composed.smoke.ts);
  *  - kernel witness: the key read from the PERSISTED row of a working connection is revoked by a
  *    test-operator account claim; exactly that socket closes while a sibling keeps working (this
  *    proves the mapping only: a fresh connect on the same bearer still gets a new key);
@@ -34,7 +33,6 @@ import {
   grantManagedActor, ledgerAclResolver, newActorToken, openAuthAuthorityPlane, startAuthCallout,
 } from "../src/index.js";
 import { openAuthorityClient } from "../src/authority-client.js";
-import { revokeManagedActor } from "../src/ledger.js";
 import { readNativeIssuance } from "../src/native-issuance.js";
 import { pickFreePort } from "../../../packages/core/smoke/_free-port.js";
 import { SMOKE_BROKER_TOKEN, teardownOnSignal } from "@cotal-ai/smoke-kit";
@@ -182,33 +180,6 @@ try {
     const left = await natkeys(kv);
     check("PR every unexpired row is untouched", others.every((k) => left.includes(k)), { others: others.length, left: left.length });
   }
-
-  // ---- SU: same-label successor ----
-  const p = await grant("seat");
-  const predBearer = await issuer.issue({ owner: OWNER, space, actor: "seat", scope: ["spawn"], lifecycleUid: p.uid, credentialId: p.credid });
-  k0 = await natkeys(kv);
-  const predNc = await connectBearer(predBearer);
-  const predKeys = fresh(k0, await natkeys(kv));
-  check("SU predecessor connects with one row under its uid", predNc !== "denied" && predKeys.length === 1);
-  if (predNc !== "denied") await predNc.close();
-  revokeManagedActor(dir, OWNER, "seat");
-  const retired = await within(plane.retireManagedLifecycle({ owner: OWNER, actor: "seat", lifecycleUid: p.uid }).then((r) => r, (e: Error) => ({ error: e.message })), 15_000);
-  const retiredOk = retired !== "timeout" && !("error" in retired) && retired.retired === true;
-  check("SU the plane retires the predecessor lifecycle", retiredOk, retired === "timeout" ? "timeout" : retired);
-  const s = mintLifecycleUid();
-  grantManagedActor(dir, { owner: OWNER, actor: "seat", scope: ["spawn"], allowSubscribe: ["general"], allowPublish: ["general"], tokenHash: newActorToken().tokenHash, lifecycleUid: s });
-  k0 = await natkeys(kv);
-  check("SU the stale predecessor bearer is DENIED after the re-grant and leaves no row", (await connectBearer(predBearer)) === "denied" && (await natkeys(kv)).length === k0.length);
-  let succCred = "";
-  try { succCred = await plane.mintConnectCredential({ owner: OWNER, actor: "seat", lifecycleUid: s }); } catch (e) { succCred = `error: ${(e as Error).message}`; }
-  const succOk = !succCred.startsWith("error");
-  const succNc = succOk ? await connectBearer(await issuer.issue({ owner: OWNER, space, actor: "seat", scope: ["spawn"], lifecycleUid: s, credentialId: succCred })) : "denied";
-  const succKeys = fresh(k0, await natkeys(kv));
-  const succRow = succKeys[0] ? await readNativeIssuance(kv, succKeys[0]) : undefined;
-  const predRow = predKeys[0] ? await readNativeIssuance(kv, predKeys[0]) : undefined;
-  check("SU the successor connects with one NEW row under the new uid and credential; the predecessor row is unchanged",
-    succNc !== "denied" && succKeys.length === 1 && succRow?.lifecycleUid === s && succRow.credentialId === succCred && predRow?.lifecycleUid === p.uid && predRow.credentialId === p.credid,
-    { succCred: succCred.slice(0, 80), succRows: succKeys.length });
 
   // ---- PF: corrupt evidence fences the plane visibly ----
   const fencedP = plane.fenced;
