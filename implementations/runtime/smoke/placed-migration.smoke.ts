@@ -2,7 +2,7 @@
  *  no broker, Manager, credential or seat process is created by this metadata cell. */
 import { MeshHandler } from "../src/mesh-handler.js";
 import { migrationSeats } from "../src/migrate.js";
-import { journalEntryKeyString, type JournalEntry, type SpawnRequest } from "@cotal-ai/lang";
+import { EffectError, journalEntryKeyString, type JournalEntry, type SpawnRequest } from "@cotal-ai/lang";
 
 const HOST = "m".repeat(26), OTHER = "n".repeat(26), UID = "s".repeat(26), RUN = "placed_migration";
 const handle = { agent: `keeper#${UID}`, persona: "keeper" };
@@ -77,5 +77,42 @@ const omitted = await adopt(original);
 check("M10 omitted request placement still preserves the recorded actual host", omitted.bound?.host === HOST && omitted.handler.seatAddress("keeper", UID).address.host === HOST);
 const resumed = await adopt(original, OTHER, { ...original.external as Record<string, unknown>, adoptedFrom: journalEntryKeyString(original) });
 check("M11 a resumed accepted spawn rejects an incompatible new requested placement", resumed.error !== undefined && resumed.submits === 0);
+// An ordinary placement refusal is catchable. It must not spend the hand-over that a later
+// valid spawn can still adopt, whether the kept entry is legacy unplaced or already placed.
+for (const [entry, badHost, goodHost, firstCell] of [
+  [legacy, HOST, undefined, 12],
+  [original, OTHER, HOST, 15],
+] as const) {
+  const handler = fresh(); handler.adoptMigratedSeats(selected(entry));
+  const bindings: Record<string, unknown>[] = [];
+  let submits = 0, reads = 0;
+  handler.goalTerminal = async ref => {
+    reads++;
+    if (ref.goalId !== original.requestId) throw new Error("wrong adopted goal selected");
+    return { state: "succeeded", data: { name: "keeper", id: "local.seat1", lifecycleUid: UID } };
+  };
+  handler.manager = async () => {
+    submits++;
+    throw new EffectError("L4000", "spawn", "fixture refuses a replacement lookup");
+  };
+  const attempt = async (placement: string | undefined, tag: string) => {
+    let got: Awaited<ReturnType<MeshHandler["spawn"]>> | undefined, error: unknown;
+    try {
+      got = await handler.spawn({ persona: "keeper", ...(placement === undefined ? {} : { placement: { endpoint: "manager", instanceId: placement } }) }, {
+        requestId: tag.repeat(43), key: { scope: [], kind: "spawn", name: `retry_${tag}`, occurrence: 0 },
+        signal: { cancelled: false }, bind: async (value: Record<string, unknown>) => { bindings.push(structuredClone(value)); },
+      } as never);
+    } catch (e) { error = e; }
+    return { got, error };
+  };
+  const refused = await attempt(badHost, "b");
+  check(`M${firstCell} incompatible placement refuses without a bind or manager lookup`,
+    refused.error instanceof EffectError && refused.error.code === "L4000" && bindings.length === 0 && submits === 0 && reads === 0);
+  const valid = await attempt(goodHost, "c");
+  check(`M${firstCell + 1} a valid spawn after refusal still adopts the original kept handle`, valid.got?.agent === handle.agent && valid.error === undefined, { got: valid.got, error: valid.error });
+  check(`M${firstCell + 2} refusal then adoption makes no replacement lookup and binds the original host`,
+    submits === 0 && reads === 1 && bindings.length === 1 && bindings[0]?.goalId === original.requestId && bindings[0]?.host === goodHost,
+    { submits, reads, bindings });
+}
 console.log(`placed-migration.smoke: ${pass} passed, ${fail} failed`);
-process.exit(pass + fail === 11 && fail === 0 ? 0 : 1);
+process.exit(pass + fail === 17 && fail === 0 ? 0 : 1);
