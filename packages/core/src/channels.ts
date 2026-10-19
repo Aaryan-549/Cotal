@@ -13,7 +13,7 @@ import { dialerFor } from "./endpoint.js";
 import { channelBucket, CHANNEL_DEFAULTS_KEY } from "./subjects.js";
 import { standaloneConnectOpts } from "./streams.js";
 import type { ChannelConfig, ChannelDefaults, DeliveryClass } from "./types.js";
-import { liveKvEntries } from "./kv-scan.js";
+import { lastKvEntries, liveKvEntries } from "./kv-scan.js";
 
 /** The declarative channel-config file read at `cotal up` to seed the registry. */
 export interface ChannelRegistryFile {
@@ -246,6 +246,10 @@ export async function readChannelRegistry(opts: {
    *  world-readable in-space, so no elevated view is needed for the read side. */
   bearer?: string;
   sentinelCreds?: string;
+  /** Read with one batched Direct Get ({@link lastKvEntries}) and bind no consumer. For a credential
+   *  that holds the bare `$JS.API.DIRECT.GET` row on the registry stream (the `operator` profile) and
+   *  no CONSUMER.DELETE there: the default scan's consumer outlives the read by five minutes (#4091). */
+  directGet?: boolean;
 }): Promise<ChannelRegistryFile> {
   const nc = await dialerFor(opts.servers)({ servers: opts.servers, ...standaloneConnectOpts({ ...opts, /* not yet wired to a recorded transport - see broker-policy/MeshEntry work */ tls: false }) });
   try {
@@ -257,7 +261,11 @@ export async function readChannelRegistry(opts: {
     let defaults: ChannelDefaults | undefined;
     try {
       // ONE pass: this was a `keys()` scan plus a per-key `get()`, so one round trip per channel.
-      for (const e of await liveKvEntries(kv)) {
+      // A Direct Get to a missing stream has no responder, so its 404 comes from STREAM.INFO first.
+      const entries = opts.directGet
+        ? (await kv.status(), (await lastKvEntries(kv)).filter((e) => e.operation !== "DEL" && e.operation !== "PURGE"))
+        : await liveKvEntries(kv);
+      for (const e of entries) {
         if (e.key === CHANNEL_DEFAULTS_KEY) {
           try { defaults = decodeChannelEntry(e); } catch { /* garbled defaults — treat as unset */ }
           continue;

@@ -1829,14 +1829,18 @@ function operatorPermissions(space: string, pr: MintPrincipal): Record<string, u
         anycastSubject(space, "*", pr.owner, pr.actor), // svc.*.<o>.<a>   — anycast any role as me
         `$KV.${presenceBucket(space)}.${principalKey(pr.owner, pr.actor).key}`, // own presence key only
         "$JS.API.INFO",
-        // Presence watch (name→id resolution + the live roster) — read-only ordered consumer. No
-        // STREAM.MSG.GET (the roster is the in-memory watch cache).
+        // Presence read (name→id resolution + the roster). The transient endpoint reads the bucket once
+        // with a batched Direct Get, whose request subject is the bare stream (#4091); the consumer rows
+        // serve a watch. No STREAM.MSG.GET.
         `$JS.API.STREAM.INFO.${PKV}`,
+        `$JS.API.DIRECT.GET.${PKV}`,
         `$JS.API.CONSUMER.CREATE.${PKV}.>`,
         `$JS.API.CONSUMER.INFO.${PKV}.>`,
-        // Channel registry read — the transient endpoint opens+watches it, and multicast reads a
-        // channel's delivery class. Read-only (no `$KV.<channel>` write — that's the provisioner).
+        // Channel registry read — the transient endpoint reads it once (batched Direct Get), multicast
+        // reads a channel's delivery class, and `channels list` scans it. Read-only (no `$KV.<channel>`
+        // write — that's the provisioner).
         `$JS.API.STREAM.INFO.${CHKV}`,
+        `$JS.API.DIRECT.GET.${CHKV}`,
         `$JS.API.STREAM.MSG.GET.${CHKV}`,
         // Keyed KV get rides `DIRECT.GET.<stream>.$KV.<bucket>.<key>` — the key is in the SUBJECT, so
         // the grant needs the trailing `.>` (unlike STREAM.MSG.GET, which carries it in the payload).

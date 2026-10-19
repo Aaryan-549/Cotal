@@ -2052,7 +2052,15 @@ from the operating system, never from `COTAL_NAME`. The wire principal comes fro
 operator credential or user bearer, not from `COTAL_NAME`, `COTAL_ID`, `COTAL_OWNER`, or
 `COTAL_ACTOR`. On an open mesh the transient endpoint self-mints its principal.
 
-The transient endpoint never joins the roster and binds no inbox. A recipient can still answer a
+The transient endpoint never joins the roster and binds no inbox. With a static or open-mesh
+credential it reads the roster and the channel registry once when it connects and binds no watch
+consumer, so it leaves nothing on the broker when it exits. On a user-auth mesh it runs on your user
+bearer, which has no batched read of those buckets, so it watches them instead, and each watch's
+consumer stays on the broker for five minutes after the send exits. A sustained send rate there can
+reach the broker's limit of 1000 consumers per stream, and the broker refuses further sends until
+the old consumers expire.
+
+A recipient can still answer a
 `send dm` or `send ask` with `cotal_dm`, by the sender's name or by the id on the message it
 holds: the reply is stored under the sender's id in the space's DM history, which an operator's DM
 view such as the dashboard's Direct messages lens shows. The `cotal send` that asked has already
@@ -2081,6 +2089,10 @@ own login as is; `set` and `default` edit the registry over a short-lived
 channel-writer view, which needs ledger scope `admin` ([Identity & auth](identity-and-auth.md)).
 On a remote user-auth mesh that view is served by the public exchange; space-history `purger`
 and the read-only admin view are not.
+
+With a static or open-mesh credential, `list` reads the registry with one Direct Get and leaves no
+consumer on the broker. On a user-auth mesh your login has no Direct Get row on the registry, so
+`list` scans it with a consumer that stays on the broker for five minutes after the command exits.
 
 
 ## history

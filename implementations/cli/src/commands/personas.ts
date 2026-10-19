@@ -167,20 +167,11 @@ async function list(verbose: boolean, running: boolean, values: ConnectValues): 
 }
 
 /** Snapshot the names currently present on the mesh — the live overlay behind `personas list
- *  --running`. Presence is a KV watch that replays asynchronously after connect (no synced signal),
- *  so let the roster settle (snapshot once its size holds steady) under a hard deadline so it never
- *  hangs. A name is "running" when an agent of exactly that name is present and not offline. */
+ *  --running`. The transient endpoint reads the roster once at start. A name is "running" when an
+ *  agent of exactly that name is present and not offline. */
 async function presentNames(values: ConnectValues): Promise<Set<string>> {
   const { ep } = await openTransient(values, "personas");
   try {
-    let last = -1;
-    let stable = 0;
-    for (let i = 0; i < 20 && stable < 3; i++) {
-      const n = ep.getRoster().length;
-      stable = n === last ? stable + 1 : 0;
-      last = n;
-      await new Promise((r) => setTimeout(r, 75));
-    }
     return new Set(ep.getRoster().filter((p) => p.status !== "offline").map((p) => p.card.name));
   } finally {
     await ep.stop();

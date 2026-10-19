@@ -49,7 +49,9 @@ export async function channels(args: ParsedArgs): Promise<void> {
 
   switch (sub) {
     case "list": {
-      printRegistry(await readChannelRegistry({ servers: server, space, ...auth }));
+      // A static or open-mesh credential reads with a Direct Get and leaves no consumer behind
+      // (#4091). The user bearer's agent profile has no Direct Get row on the registry, so it scans.
+      printRegistry(await readChannelRegistry({ servers: server, space, ...auth, directGet: !conn.bearer }));
       return;
     }
     case "set": {
