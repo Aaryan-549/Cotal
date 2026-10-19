@@ -84,6 +84,7 @@ import { validateRetainedManagedAgent } from "./continuity.js";
 import { reconstructRemoteManagerServeGrant, remoteManagerServeGrantFromCluster, remoteManagerSurface, type ManagerCluster } from "./manager-contract.js";
 import { authorityBarrierGrants, authorityWriterGrants, openAuthorityClient, openSupervisedConnectReader, platformReadinessGrants, remoteManagerIssuerGrants, remoteManagerRegistrationProof, registrationExecutorGrants, servedRunRequestSubjects, type AuthorityClient } from "./authority-client.js";
 import { authorizeConnectCredential } from "./connect-reader.js";
+import { makeNativeIssuanceRecorder, type NativeIssuanceRecorder } from "./native-issuance.js";
 import { ensureRootCredential } from "./root-credential.js";
 import { activateLifecycleAtUid, observeGate, openLifecycleRegistry, readLifecycleHeadForOperation, type LifecycleRegistry } from "./lifecycle-registry.js";
 import { openAuthLedgerScannerCandidate } from "./ledger-scanner.js";
@@ -189,6 +190,9 @@ const MANAGER_PIN_REMEDY: Record<ManagerCaller | "wire", string> = {
  *  ensure both exchange arms stamp `act.credentialId` from. */
 export interface AuthAuthorityPlane {
   authorizeConnect: (t: ValidatedUserToken) => Promise<void>;
+  /** The callout's required native-key issuance recorder (SPEC 13.1 `natkey.`): create-only, then
+   *  the same connect authority re-read before the minted JWT may leave. */
+  recordIssuance: NativeIssuanceRecorder;
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
   /** `caller` picks the remedy an ambiguity refusal names: `--on` for the human (CLI) arm,
    *  `cotal agent-bearer`'s `--manager-instance` for the agent arm, the wire field otherwise. */
@@ -632,6 +636,13 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
   const authAdmin = await openAuthAdminListener({ onConnection, server, space, dataAccount, reg: barrierReg, retirement, barrierFlight: retirementFlights, instanceId: authServeInstanceId, epoch: authServeGrant.epoch, grant: authServeGrant, log });
   unwind.push(() => authAdmin.close());
   const fileArm = ledgerAuthorizeConnect(opts.dir);
+  // The callout's issuance evidence: create-only natkey row, then the connect authority re-read
+  // in the same stream before the minted JWT may leave.
+  const recordIssuance = makeNativeIssuanceRecorder(registry, async (t) => {
+    refuseIfFenced();
+    fileArm(t);
+    await authorizeConnectCredential(reader.current(), t, Date.now);
+  });
   const recordsJsm = await jetstreamManager(remoteIssuer.nc);
   const authKv = await new Kvm(remoteIssuer.nc).open(epAuthBucket(space));
   const managerIssuanceGate = (instanceId: string) => serveIssuanceGateKv(authKv, space, { endpoint: "manager", instanceId });
@@ -777,6 +788,10 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       refuseIfFenced();
       fileArm(t);
       await authorizeConnectCredential(reader.current(), t, Date.now);
+    },
+    recordIssuance: (i) => {
+      refuseIfFenced();
+      return recordIssuance(i);
     },
     mintConnectCredential: (args) => {
       refuseIfFenced();
@@ -2104,6 +2119,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
       space,
       token: { key: issuer.localKeySet(), issuer: issuer.issuer },
       authorizeActor: plane.authorizeConnect,
+      recordIssuance: plane.recordIssuance,
       permissionsFor: calloutPermissions(ledgerAclResolver(dir), plane.authorizeManagerCaller, plane.verifySession, plane.issueUserCaller),
       log: (l) => console.error(l),
     });

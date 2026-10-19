@@ -36,6 +36,7 @@ import { assertInboxConnId, newIdentity, principalKey, principalTags, token } fr
 import type { JWTVerifyGetKey, CryptoKey } from "jose";
 import { validateUserToken, type ValidatedUserToken } from "./token.js";
 import { SESSION_EXP } from "./permissions.js";
+import type { NativeIssuanceRecorder } from "./native-issuance.js";
 
 /** The one subject the callout serves (ADR-26). */
 export const AUTH_CALLOUT_SUBJECT = "$SYS.REQ.USER.AUTH";
@@ -168,6 +169,11 @@ export interface StartAuthCalloutOpts {
    *  nkey pre-connect; core's `assertInboxConnId` rejects a nonce with subject metacharacters, so it
    *  cannot widen the grant. An absent/invalid nonce makes the builder throw → a signed deny. */
   permissionsFor: (t: ValidatedUserToken, connId: string) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  /** REQUIRED: durably record the minted JWT's broker user key (`req.user_nkey`) against the validated
+   *  principal BEFORE the response leaves (SPEC 13.1 `natkey.`). Awaited; a throw becomes the signed
+   *  deny and the minted JWT is never sent. A thrown record write may still have landed: evidence of
+   *  an issuance, never proof a client received the JWT or the connection was accepted. */
+  recordIssuance: NativeIssuanceRecorder;
   /** Diagnostics sink (default: console.error). Never carries bearer contents. */
   log?: (line: string) => void;
   /** Audit hook fired on each successful mint, BEFORE the response is sent — the minted user JWT
@@ -184,6 +190,7 @@ export function startAuthCallout(nc: CalloutConnection, opts: StartAuthCalloutOp
   const responseSigner = fromSeed(new TextEncoder().encode(opts.authAccount.signingSeed));
   const userSigner = fromSeed(new TextEncoder().encode(opts.dataAccount.signingSeed));
   if (!opts.space) throw new Error("auth callout: space is required");
+  if (typeof opts.recordIssuance !== "function") throw new Error("auth callout: recordIssuance is required - refusing to start a callout whose successes leave no native-key issuance evidence");
   const log = opts.log ?? ((l: string) => console.error(l));
   const enc = (s: string) => new TextEncoder().encode(s);
   const dec = (u: Uint8Array) => new TextDecoder().decode(u);
@@ -290,6 +297,7 @@ export function startAuthCallout(nc: CalloutConnection, opts: StartAuthCalloutOp
           { ...perms, tags: principalTags(validated.owner, validated.act.actor) },
           { signer: userSigner, exp }, // NATS access dies with the bearer (a session-caller: with its grant)
         );
+        await opts.recordIssuance({ userNkey: req.user_nkey, token: validated, connId: inboxNonce, iat: decode(userJwt).iat, exp });
         opts.onMint?.({ jwt: userJwt, principal: key, exp });
         await respond({ jwt: userJwt });
       } catch (e) {
