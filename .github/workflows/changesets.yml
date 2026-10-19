@@ -24,14 +24,87 @@ concurrency:
   queue: max
 
 jobs:
+  # Version-only admission. The action decides from its own changeset state: with changesets it
+  # opens or updates the version PR, and without them it returns, because this step names no
+  # `publish` script and has no OIDC token. A version-only push can never publish, so it does not
+  # wait for the native cold matrix. `hasChangesets` decides whether this run publishes at all.
+  # The job always runs and a snapshot dispatch skips its steps, so a skipped job never sits
+  # upstream of cold-setup or the snapshot job.
+  version-pr:
+    timeout-minutes: 35
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      ADMIT: ${{ github.event_name == 'push' || inputs.snapshot == '' }}
+    outputs:
+      has-changesets: ${{ steps.changesets.outputs.hasChangesets }}
+    steps:
+      - name: Checkout
+        if: env.ADMIT == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Setup pnpm
+        if: env.ADMIT == 'true'
+        uses: pnpm/action-setup@v6.0.8
+
+      - name: Setup Node.js
+        if: env.ADMIT == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        if: env.ADMIT == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Create or update the version PR
+        id: changesets
+        if: env.ADMIT == 'true'
+        uses: changesets/action@v1
+        with:
+          version: pnpm ci:version
+          title: "chore(release): version packages"
+          commit: "chore(release): version packages"
+          setupGitUser: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      # An absent or unexpected output is a failure, never a state: publication is admitted only on
+      # an explicit `false`.
+      - name: Require a definite changeset state
+        if: env.ADMIT == 'true'
+        env:
+          HAS_CHANGESETS: ${{ steps.changesets.outputs.hasChangesets }}
+        run: test "$HAS_CHANGESETS" = true || test "$HAS_CHANGESETS" = false
+
+      # Keep the "version packages" PR out of the generated release notes (excluded via .github/release.yml).
+      - name: Label the release PR
+        if: env.ADMIT == 'true' && steps.changesets.outputs.pullRequestNumber
+        run: gh pr edit ${{ steps.changesets.outputs.pullRequestNumber }} --add-label skip-changelog
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+  # The packaged native cold matrix runs before every publication: a snapshot dispatch, or a normal
+  # push whose admission found no changesets left. With no status function here, version-pr must
+  # have succeeded, so a failed admission starts no matrix and an empty output admits nothing.
   cold-setup:
+    needs: [version-pr]
+    if: (github.event_name == 'workflow_dispatch' && inputs.snapshot != '') || needs.version-pr.outputs.has-changesets == 'false'
     uses: ./.github/workflows/cold-setup.yml
     with:
       snapshot: ${{ inputs.snapshot || '' }}
 
+  # The publication arm. With no status function in `if`, every need must have succeeded, so a
+  # skipped, failed or cancelled cold matrix leaves this job skipped.
   version:
-    if: github.event_name == 'push' || inputs.snapshot == ''
-    needs: [cold-setup]
+    if: needs.version-pr.outputs.has-changesets == 'false'
+    needs: [version-pr, cold-setup]
     timeout-minutes: 35
     runs-on: ubuntu-latest
     environment: npm-publish
