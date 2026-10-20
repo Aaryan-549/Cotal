@@ -215,6 +215,9 @@ import {
   STATIC_SLOT_READ_FAILED_DETAIL,
 } from "./static-lifecycle.js";
 
+// Capture the loaded package version before an installation can replace its files.
+const MANAGER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+
 /** Minimum slot lifetime for rate-flooring (P4c). A slot freed (by despawn OR natural exit/reap)
  *  before living this long leaves a cooling stamp that still counts toward the ceiling until it
  *  expires — so churn (spawn↔despawn or spawn↔fast-exit) can't outrun the concurrency bound. */
@@ -7701,6 +7704,8 @@ export class Manager {
   private managerStatusData(ownerFilter: string | undefined): ManagerStatus {
     return {
       instanceId: this.managerInstanceId,
+      host: hostname(),
+      version: MANAGER_VERSION,
       execution: this.execution,
       runtime: this.runtimeKind,
       custody: this.execution === "none" ? "none" : this.requiredRuntime.kind === "pty" && this.requiredRuntime.supportsRelease === true ? "custodied" : "legacy",

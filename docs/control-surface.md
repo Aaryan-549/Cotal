@@ -347,6 +347,13 @@ the target, and the same re-issue repairs it within the same bound. An agent tha
 still ends in that refusal once the re-issues run out. A pinned call gets the refusal of the
 instance it named.
 
+A verified Manager `status` reply includes `host`, the answering process's host name, and
+`version`, the running `@cotal-ai/manager` package version captured when its module loaded.
+These fields are advisory display metadata. They do not select a Manager, authorize a caller
+or determine placement. Use the verified responder's `instanceId` for attribution. Clients
+must accept status payloads that omit either field and leave the missing value unknown.
+The optional fields advance the Manager cluster revision to 28.
+
 A manager whose boot inventory marked every declared connector unavailable does not subscribe
 `spawn` or `launch` on the class `one` rail. Those commands stay on scatter and on this
 instance's `inst` rail, so a sibling that can launch them can take an unpinned spawn, and a

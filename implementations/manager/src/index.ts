@@ -23,7 +23,7 @@ export {
   MAX_RESUME_COMMIT_BYTES,
   type ResumeControlArgs,
 } from "./resume.js";
-export { SPAWN_INPUT_KEYS, type ManagerStaticReconciliationSweep } from "./manager-service-contract.js";
+export { SPAWN_INPUT_KEYS, type ManagerStatus, type ManagerStaticReconciliationSweep } from "./manager-service-contract.js";
 export { managerBrowserContractSource, managerClusterArtifacts } from "./manager-service-contract.js";
 export { RunHosting, type RunHostingContext } from "./run-hosting.js";
 export * as remoteManagerClient from "./remote-authority.js";
