@@ -155,7 +155,8 @@ import {
 } from "../lib/restore.js";
 
 const pendingRestores = new Map<string, PreparedRestore>();
-interface PendingOrdinaryResume {
+interface BrokerLogOptions { logFile?: string; logfileSizeLimit?: number; logfileMaxNum?: number; }
+interface PendingOrdinaryResume extends BrokerLogOptions {
   root: string;
   attemptId: string;
   space: string;
@@ -362,7 +363,7 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
       } else if (journal?.state === "ready") {
         const resume = readMaintenanceResumeDocument(root, journal.resume);
         const attemptId = `resume-${randomUUID()}`;
-        const launch = resume.launch as { server?: unknown; storeDir?: unknown; maxFileStore?: unknown };
+        const launch = resume.launch as { server?: unknown; storeDir?: unknown; maxFileStore?: unknown } & Record<string, unknown>;
         const agents = (resume.inventory as { agents?: Array<{ launch?: { runtime?: unknown } }> }).agents ?? [];
         const runtimes = [...new Set(agents.map((agent) => agent.launch?.runtime).filter((value): value is string => typeof value === "string"))];
         if (runtimes.length > 1) throw new Error(`resume inventory requires multiple runtimes: ${runtimes.join(", ")}`);
@@ -378,6 +379,7 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
         // The cap is part of the preserved launch, like the store: a resume re-renders it, and a
         // different --max-file-store is refused rather than silently resizing the preserved broker.
         const resumeMaxFileStore = journaledMaxFileStore(launch.maxFileStore);
+        const resumeLog = journaledBrokerLog(launch, values);
         const requestedMaxFileStore = parsePositiveIntegerFlag("--max-file-store", values["max-file-store"]);
         if (requestedMaxFileStore !== undefined && requestedMaxFileStore !== resumeMaxFileStore)
           throw new Error(`--max-file-store ${requestedMaxFileStore} is not the preserved launch cap (${resumeMaxFileStore ?? "unset"}); ordinary up resumes exactly the preserved cap - omit --max-file-store`);
@@ -396,6 +398,7 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
             server: resumeServer,
             storeDir: resumeStore,
             ...(resumeMaxFileStore !== undefined ? { maxFileStore: resumeMaxFileStore } : {}),
+            ...resumeLog,
             runtime: resumeRuntime,
             detached: Boolean(values.detach),
             serverName,
@@ -416,6 +419,7 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
           server: resumeServer,
           storeDir: resumeStore,
           ...(resumeMaxFileStore !== undefined ? { maxFileStore: resumeMaxFileStore } : {}),
+          ...resumeLog,
           runtime: resumeRuntime,
           detached: Boolean(values.detach),
           inventory: resume.inventory,
@@ -429,9 +433,11 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
         const launch = journal.ordinaryResume.launch as {
           server?: unknown; storeDir?: unknown; maxFileStore?: unknown; runtime?: unknown; detached?: unknown;
           serverName?: unknown; serverNonce?: unknown;
+          [key: string]: unknown;
         };
         const attemptId = journal.ordinaryResume.attemptId;
         const recoveredMaxFileStore = journaledMaxFileStore(launch.maxFileStore);
+        const recoveredLog = journaledBrokerLog(launch, values);
         const requestedMaxFileStore = parsePositiveIntegerFlag("--max-file-store", values["max-file-store"]);
         if (requestedMaxFileStore !== undefined && requestedMaxFileStore !== recoveredMaxFileStore)
           throw new Error(`--max-file-store ${requestedMaxFileStore} is not the preserved launch cap (${recoveredMaxFileStore ?? "unset"}); resume attempt ${attemptId} re-renders exactly the preserved cap - omit --max-file-store`);
@@ -478,6 +484,7 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
           server: typeof launch.server === "string" ? launch.server : DEFAULT_SERVER,
           storeDir: journal.source.path,
           ...(recoveredMaxFileStore !== undefined ? { maxFileStore: recoveredMaxFileStore } : {}),
+          ...recoveredLog,
           runtime: typeof launch.runtime === "string" ? launch.runtime : "pty",
           detached: launch.detached === true,
           inventory: resume.inventory,
@@ -534,6 +541,9 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
               server: pending.server,
               "store-dir": pending.storeDir,
               "max-file-store": pending.maxFileStore === undefined ? undefined : String(pending.maxFileStore),
+              "log-file": pending.logFile,
+              "logfile-size-limit": pending.logfileSizeLimit === undefined ? undefined : String(pending.logfileSizeLimit),
+              "logfile-max-num": pending.logfileMaxNum === undefined ? undefined : String(pending.logfileMaxNum),
               runtime: pending.runtime,
               detach: pending.detached,
               open: pending.mode === "open",
@@ -572,11 +582,13 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
   const publicExchange = publicExchangeArgs(values, wantUser);
   const maxSessions = parsePositiveIntegerFlag("--max-sessions", values["max-sessions"]);
   const maxFileStore = parsePositiveIntegerFlag("--max-file-store", values["max-file-store"]);
-  if (values["log-file"] !== undefined && (!values["log-file"].trim() || /[\0\r\n]/.test(values["log-file"])))
+  if (values["log-file"] !== undefined && (!values["log-file"].trim() || /[\x00-\x1f\x7f]/.test(values["log-file"])))
     throw new Error("--log-file must be a non-empty file path");
   const logFile = values["log-file"] !== undefined ? resolve(values["log-file"]) : undefined;
   const logfileSizeLimit = parsePositiveIntegerFlag("--logfile-size-limit", values["logfile-size-limit"]);
   const logfileMaxNum = parsePositiveIntegerFlag("--logfile-max-num", values["logfile-max-num"]);
+  if (!values.file && logFile === undefined && (logfileSizeLimit !== undefined || logfileMaxNum !== undefined))
+    throw new Error("rotation bounds require --log-file");
   // The manifest path renders its broker from the manifest, which has no store fields, so the flag
   // would be accepted and never rendered. Refuse it rather than drop it.
   if (maxFileStore !== undefined && values.file)
@@ -1370,6 +1382,7 @@ async function runUp(args: ParsedArgs, inheritedLock?: MaintenanceLock, onAdopt?
       host: values.host,
       maxSessions,
       maxFileStore,
+      logFile, logfileSizeLimit, logfileMaxNum,
       publicExchange,
       resumeAttempt,
       resumeCommitToken: restored?.managerCommit?.durableCommitToken ?? ordinaryAttempt?.managerCommit?.durableCommitToken,
@@ -1714,6 +1727,7 @@ async function resumeProvenOrdinaryListener(pending: PendingOrdinaryResume, held
     ...(adoptAttachHost ? { attachHost: adoptAttachHost } : {}),
     ...(adoptMaxSessions !== undefined ? { maxSessions: adoptMaxSessions } : {}),
     ...(pending.maxFileStore !== undefined ? { maxFileStore: pending.maxFileStore } : {}),
+    ...brokerLogFields(pending),
     storeDir: resolve(pending.storeDir),
     ts: new Date().toISOString(),
   }, "started");
@@ -2428,6 +2442,9 @@ async function serveReadyListener(l: {
   host?: string;
   maxSessions?: number;
   maxFileStore?: number;
+  logFile?: string;
+  logfileSizeLimit?: number;
+  logfileMaxNum?: number;
   publicExchange?: string[];
   resumeAttempt?: string;
   resumeCommitToken?: string;
@@ -2475,6 +2492,7 @@ async function serveReadyListener(l: {
     ...(attachHost ? { attachHost } : {}),
     ...(maxSessions !== undefined ? { maxSessions } : {}),
     ...(l.maxFileStore !== undefined ? { maxFileStore: l.maxFileStore } : {}),
+    ...brokerLogFields(l),
     storeDir: l.storeDir,
     ts: new Date().toISOString(),
   }, "started");
@@ -2518,7 +2536,7 @@ export interface DetachOpts {
   storeDir?: string;
   /** JetStream file storage cap in bytes (`--max-file-store`), rendered and recorded by this boot. */
   maxFileStore?: number;
-  /** Broker log file path (`--log-file`). Defaults to `.cotal/nats.log` when log rotation is enabled. */
+  /** Native broker log file path (`--log-file`), required with rotation bounds. */
   logFile?: string;
   /** Broker log rotation threshold in bytes (`--logfile-size-limit`). */
   logfileSizeLimit?: number;
@@ -2595,6 +2613,8 @@ export async function startMeshDetached(
   // effective server is finally known — a manifest may name a different host than the flags did, and
   // a certificate that is valid for one is not thereby valid for the other.
   const transport = assertServesDialHost(opts.transport, new URL(server).hostname);
+  if (opts.logFile === undefined && (opts.logfileSizeLimit !== undefined || opts.logfileMaxNum !== undefined))
+    throw new Error("rotation bounds require --log-file");
   const hasNativeLog = opts.logFile !== undefined || opts.logfileSizeLimit !== undefined || opts.logfileMaxNum !== undefined;
   const logPath = opts.logFile ? resolve(opts.logFile) : cotalPath("nats.log");
   if (hasNativeLog) mkdirSync(dirname(logPath), { recursive: true });
@@ -2619,9 +2639,14 @@ export async function startMeshDetached(
   const startOffset = existsSync(logPath) ? statSync(logPath).size : 0;
   let child: ChildProcess;
   let listenerStartedAt: string;
-  if (hasNativeLog) {
+  const startupPath = hasNativeLog ? cotalPath("nats-startup.log") : undefined;
+  if (startupPath) {
+    // Native logging owns its rotating inode. Pre-logger config/open failures still use stderr,
+    // so retain that separately without a pipe that depends on this parent staying alive.
+    const fd = openSync(startupPath, "w", 0o600);
     listenerStartedAt = new Date().toISOString();
-    child = spawn(bin, args, { detached: true, stdio: "ignore" });
+    try { child = spawn(bin, args, { detached: true, stdio: ["ignore", fd, fd] }); }
+    finally { closeSync(fd); }
   } else {
     const fd = openSync(logPath, "a");
     listenerStartedAt = new Date().toISOString();
@@ -2635,6 +2660,14 @@ export async function startMeshDetached(
   if (opts.onLine) tailLines(logPath, startOffset, opts.onLine, () => !tailing);
   try {
     await awaitSpawnedListener({ child, server, space, creds: setup?.creds, log: logPath, boundListener: opts.boundListener });
+  } catch (error) {
+    if (!startupPath) throw error;
+    const fd = openSync(startupPath, "r");
+    const bytes = Buffer.alloc(8192);
+    let diagnostic: string;
+    try { diagnostic = bytes.subarray(0, readSync(fd, bytes, 0, bytes.length, 0)).toString("utf8").trim(); }
+    finally { closeSync(fd); }
+    throw new Error(`${(error as Error).message}; startup diagnostics: ${startupPath}${diagnostic ? `\n${diagnostic}` : " (empty)"}`, { cause: error });
   } finally {
     tailing = false;
   }
@@ -2643,6 +2676,7 @@ export async function startMeshDetached(
     host: opts.host,
     maxSessions: opts.maxSessions,
     maxFileStore: opts.maxFileStore,
+    ...brokerLogFields(opts),
     publicExchange: opts.publicExchange,
     resumeAttempt: opts.resumeAttempt,
     resumeCommitToken: opts.resumeCommitToken,
@@ -2797,6 +2831,38 @@ export function attachHostFor(space: string, explicit?: string): string | undefi
  */
 export function maxSessionsFor(space: string, explicit?: number): number | undefined {
   return explicit ?? findMesh(space)?.maxSessions;
+}
+
+/** Persist only chosen native log options, preserving absence for old launch records. */
+function brokerLogFields(log: BrokerLogOptions): BrokerLogOptions {
+  return { ...(log.logFile !== undefined ? { logFile: log.logFile } : {}),
+    ...(log.logfileSizeLimit !== undefined ? { logfileSizeLimit: log.logfileSizeLimit } : {}),
+    ...(log.logfileMaxNum !== undefined ? { logfileMaxNum: log.logfileMaxNum } : {}) };
+}
+function journaledBrokerLog(launch: Record<string, unknown>, values: Record<string, string | boolean | undefined>): BrokerLogOptions {
+  const log: BrokerLogOptions = {};
+  if (launch.logFile !== undefined) {
+    if (typeof launch.logFile !== "string" || !launch.logFile.trim() || /[\x00-\x1f\x7f]/.test(launch.logFile) || resolve(launch.logFile) !== launch.logFile)
+      throw new Error("the preserved launch records an invalid logFile; refusing to guess");
+    log.logFile = launch.logFile;
+  }
+  for (const field of ["logfileSizeLimit", "logfileMaxNum"] as const) {
+    const value = launch[field];
+    if (value !== undefined) {
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+        throw new Error(`the preserved launch records an invalid ${field}; refusing to guess`);
+      log[field] = value;
+    }
+  }
+  if (log.logFile === undefined && (log.logfileSizeLimit !== undefined || log.logfileMaxNum !== undefined))
+    throw new Error("the preserved launch rotation bounds require logFile");
+  for (const [flag, field] of [["log-file", "logFile"], ["logfile-size-limit", "logfileSizeLimit"], ["logfile-max-num", "logfileMaxNum"]] as const) {
+    const raw = values[flag];
+    const requested = raw === undefined ? undefined : field === "logFile" ? resolve(String(raw)) : parsePositiveIntegerFlag(`--${flag}`, String(raw));
+    if (requested !== undefined && requested !== log[field])
+      throw new Error(`--${flag} is not the preserved launch value; omit it to resume the preserved logging options`);
+  }
+  return log;
 }
 
 /** The store cap a preserved launch recorded: absent, or a positive integer byte count. Anything

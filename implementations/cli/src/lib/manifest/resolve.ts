@@ -206,7 +206,9 @@ function invertPolicy(name: string, channels: ResolvedChannel[]): AgentPolicy {
 function validateBroker(broker: NonNullable<RawManifest["broker"]>, add: (m: string, p?: (string | number)[]) => void): void {
   if (broker.host?.includes("://"))
     add(`broker.host is a bind address (e.g. 127.0.0.1), not a URL - drop the scheme`, ["broker", "host"]);
-  if (broker.logFile !== undefined && (!broker.logFile.trim() || /[\0\r\n]/.test(broker.logFile)))
+  if (broker.logFile === undefined && (broker.logfileSizeLimit !== undefined || broker.logfileMaxNum !== undefined))
+    add(`broker rotation bounds require broker.logFile`, ["broker", "logFile"]);
+  if (broker.logFile !== undefined && (!broker.logFile.trim() || /[\x00-\x1f\x7f]/.test(broker.logFile)))
     add(`broker.logFile must be a non-empty file path`, ["broker", "logFile"]);
   if (broker.servers) for (const problem of serverUrlProblems(broker.servers, "broker.servers")) add(problem, ["broker", "servers"]);
   // `idp` pairs with user auth ONLY — on any other mode it would be silently ignored, and a

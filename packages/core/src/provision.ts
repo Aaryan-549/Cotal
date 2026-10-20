@@ -2960,7 +2960,7 @@ function renderLogBlock(
 ): string {
   const lines: string[] = [];
   if (opts.logFile !== undefined) {
-    if (typeof opts.logFile !== "string" || opts.logFile.trim().length === 0 || /[\0\r\n]/.test(opts.logFile))
+    if (typeof opts.logFile !== "string" || opts.logFile.trim().length === 0 || /[\x00-\x1f\x7f]/.test(opts.logFile))
       throw new Error(`${renderer}: logFile must be a non-empty path (got ${String(opts.logFile)})`);
     lines.push(`log_file: ${JSON.stringify(opts.logFile)}`);
   }
@@ -2974,6 +2974,8 @@ function renderLogBlock(
       throw new Error(`${renderer}: logfileMaxNum must be a positive integer file count (got ${String(opts.logfileMaxNum)})`);
     lines.push(`logfile_max_num: ${opts.logfileMaxNum}`);
   }
+  if (opts.logFile === undefined && (opts.logfileSizeLimit !== undefined || opts.logfileMaxNum !== undefined))
+    throw new Error(`${renderer}: rotation bounds require logFile`);
   return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
