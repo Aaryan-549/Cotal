@@ -278,6 +278,15 @@ which begin after the session is already running. **Hermes**' launcher starts a 
 needs the control token. For those two, a shell the seat runs still inherits a path to the material
 file, though not the material itself.
 
+The material's private directory is also a launch artifact (see
+[Private launch files](authoring-a-connector.md#private-launch-files)), so the launcher removes it
+when the seat's process exits, the same way it removes a persona file. For Claude that is when the
+file goes. Hermes' launcher merges the file it was given into a second file of its own for the
+gateway child, and that second file is not a launch artifact. The launcher writes the file after
+every check that can refuse the launch, so a refused launch leaves none behind. A file can still
+outlive its seat when the launcher and the child's watcher were both killed, or when a spawn failed
+after the file was written but before any process started. The OS temp reaper removes those.
+
 What this does: the values are out of every descendant's environment, so an `env` dump, a CI log, a
 suite that defaults its broker from the environment, or a tool handed a credential it never asked
 for, all stop seeing them. What it does not do: hide the material from a process running as the same

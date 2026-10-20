@@ -252,6 +252,9 @@ const GOLDEN: Record<string, { flags: string[]; positionals: boolean; rawArgs?: 
     ],
     positionals: false,
   },
+  // `app-identity` (2026-10, #4082): hidden plumbing the Claude connector's local server runs to
+  // open (`provision`) or retire one Claude app conversation's identity on a local mesh.
+  "app-identity": { flags: ["dir:string", "name:string", "space:string"], positionals: true },
   // Gate 1 (user-mode agent launch): the machine-facing bearer refresh a spawned agent execs.
   // `--manager-call` / `--manager-instance` (2026-09): mint a token bound to one manager instance.
   "agent-bearer": {

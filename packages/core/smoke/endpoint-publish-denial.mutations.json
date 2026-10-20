@@ -9,7 +9,7 @@
   "mutations": [
     {
       "name": "epCall never races the publish-denial watch, so a refused publish waits out the budget",
-      "file": "packages/core/src/endpoint-verbs.ts",
+      "file": "packages/core/src/endpoint-call.ts",
       "find": "    const msg = await Promise.race([outcome, timeout, denialWatch.denied, cancelled]);",
       "replace": "    denialWatch.denied.catch(() => {});\n    const msg = await Promise.race([outcome, timeout, cancelled]);",
       "expectRed": "invoke is permission-denied, NOT a deadline",
@@ -33,7 +33,7 @@
     },
     {
       "name": "epCast never races the publish-denial watch, so a refused cast resolves as success",
-      "file": "packages/core/src/endpoint-verbs.ts",
+      "file": "packages/core/src/endpoint-call.ts",
       "find": "    await Promise.race([\n      nc.flush().then(() => new Promise<void>((resolve) => setImmediate(resolve))),\n      denialWatch.denied,\n    ]);",
       "replace": "    denialWatch.denied.catch(() => {});\n    await nc.flush();",
       "expectRed": "a denied cast is permission-denied naming the refused subject, not success",
@@ -41,7 +41,7 @@
     },
     {
       "name": "the probe never races the publish-denial watch, so a refused publish expires into unknown",
-      "file": "packages/core/src/endpoint-verbs.ts",
+      "file": "packages/core/src/endpoint-call.ts",
       "find": "    return await Promise.race([verdict, denialWatch.denied]);",
       "replace": "    denialWatch.denied.catch(() => {});\n    return await verdict;",
       "expectRed": "a denied probe is permission-denied naming the refused subject, not unknown",

@@ -1,5 +1,16 @@
 # @cotal-ai/lang
 
+## 0.88.0
+
+## 0.87.0
+
+## 0.86.0
+
+### Patch Changes
+
+- add70b8: `validate()` and `transform()` now refuse a write to a `const` binding through a destructuring assignment (`[c] = [1]`, `({ c } = { c: 1 })`) or a `for...of` with no declaration (`for (c of xs)`) with L2003. These used to validate clean and fail with L2003 only when the line ran, after any effects dispatched before it.
+- e754d4f: `validate()` now refuses with L2032 a `waitUntil` probe or `terminal` predicate that writes a binding declared, or a value built, outside it. Both engines run them one level deeper than the call and refuse the write at run time, so such a program used to validate clean and then fail on the first observation of every run.
+
 ## 0.85.0
 
 ## 0.84.0

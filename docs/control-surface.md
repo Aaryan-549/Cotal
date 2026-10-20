@@ -65,6 +65,9 @@ The manager's `resolve-cwd` command is in the `manager.spawn` capability class. 
 absolute path on that manager's host and returns its canonical directory plus the host name. It
 refuses a relative, missing or non-directory path with `failed-precondition`; it creates nothing.
 `spawn` applies the same check at admission, before any credentials or durables are minted.
+A runtime that delegates seats outside the manager's host cannot use a host cwd. Its manager
+refuses `resolve-cwd` with `failed-precondition` before any filesystem lookup, with the same
+execution-mode refusal for every path. It returns no host name or canonical path.
 
 The manager's `resolve-agent` command is minted beside `spawn` in the spawn capability and the
 operator instruments. It accepts the persona fields `spawn` takes (`name`, `config`, `agent`,
@@ -73,6 +76,12 @@ then the persona's `agent:` pin, then the caller's default, then the manager's o
 the persona with the same visibility check as `spawn` and launches nothing. A detached `--resume`
 without `--agent` asks it before carrying a session, and a manager that does not serve it refuses
 the call.
+
+On a delegated runtime, both `resolve-agent` and `spawn` refuse an explicit persona `config`
+before any lookup of that path. Absolute, relative and bare-name config overrides receive the
+same `failed-precondition` refusal. Select a named catalog persona through `name` instead.
+Locally executing managers retain their config-path behavior. A resolved manifest uses its own
+validated, host-materialized persona resource and is not a caller-selected config override.
 
 `spawn` refuses an empty or whitespace-only value in any of its optional string fields, such as
 `role`, `agent` or `identity`, with `bad-request` naming the field. To take the persona file's value,
@@ -228,7 +237,11 @@ the whole id, because both surfaces take nothing else.
 On a user-auth mesh, manager commands obtain a short-lived `manager-caller` view from the
 exchange. It authorizes one concrete manager instance using the caller's current actor grant and
 the host's registered service records. Discovery and invocation both use that instance's `inst`
-route. This view grants no registry scan, class queue, or additional command capability. An absent,
+route. This view grants no registry scan or class queue. It adds no command capability except the
+three reads a launch needs: a view whose actor holds `spawn` may call `status`, `models` and
+`resolve-cwd` on that instance, subject to the execution-mode limit above. A `run`-only or no-scope view may not, and `ps` and `slots` stay with
+`admin`. A user mesh's co-located manager answers every owner's view, so its `status` counts only the
+caller's own seats, as `ps` would list them, unless the caller holds `admin`. An absent,
 ambiguous or unauthorized selection refuses before the command is sent. An ambiguous one lists the
 owner's live manager instance ids and names the caller's way to pick one: `--on <instanceId>` for
 the CLI, `--manager-instance <instanceId>` for `cotal agent-bearer --manager-call`, and the
@@ -333,6 +346,13 @@ it runs. That manager refuses with `expired` and `not-executed` and says it hold
 the target, and the same re-issue repairs it within the same bound. An agent that no manager hosts
 still ends in that refusal once the re-issues run out. A pinned call gets the refusal of the
 instance it named.
+
+A verified Manager `status` reply includes `host`, the answering process's host name, and
+`version`, the running `@cotal-ai/manager` package version captured when its module loaded.
+These fields are advisory display metadata. They do not select a Manager, authorize a caller
+or determine placement. Use the verified responder's `instanceId` for attribution. Clients
+must accept status payloads that omit either field and leave the missing value unknown.
+The optional fields advance the Manager cluster revision to 28.
 
 A manager whose boot inventory marked every declared connector unavailable does not subscribe
 `spawn` or `launch` on the class `one` rail. Those commands stay on scatter and on this

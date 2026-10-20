@@ -33,6 +33,19 @@ the full `up` orchestration are **not** public runners: `up` also does broker br
 process and registry management, and lifecycle work, and `supervise`'s orchestration is private (see
 [Supervisor signing authority](#supervisor-signing-authority)).
 
+## Account connection census
+
+`mintAccountCensusCreds` creates a host-only SYS user with at most five minutes of authority.
+It can request CONNZ for one DATA account and subscribe only to an account-qualified reply prefix.
+It grants neither KICK nor account events. The host supplies a registered SYS signer; the helper
+does not find, persist or renew that signer, and the broker verifies its authority on connection.
+`observeAccountCensusWithCreds` requires this narrow scope and a pinned server key. It reads one
+bounded page. Malformed, incomplete, multiple-server or cluster-declared replies are unknown,
+with no connection list. A complete result describes only that server's observed account page.
+The host still needs independent topology and restore guarantees, deny-new, a fixed cutoff and
+lifecycle fencing before using an observation for retirement. These helpers do not grant service
+registration or terminal retirement.
+
 ## Owner-bound platform supervisors
 
 A host can start one user's supervisor without retaining that user's login. Pass
@@ -105,6 +118,7 @@ absent. The reported path is kept byte for byte, whitespace included; an empty s
 | `DELIVERY_CREDS_KIND`, `MEMBERSHIP_RW_CREDS_KIND` | `@cotal-ai/workspace` | the operator-facing KIND names (`delivery.creds`, `membership-rw.creds`) those keys are built from, and what renewal results report. A kind is **not** a key: putting a cred under the bare kind writes the pre-0.4 flat location, which nothing reads. |
 | `Manager`, `ManagerOptions` *(type)* | `@cotal-ai/manager` | construct and run a supervisor in-process; `ManagerOptions.secretStore` injects the one store it reads/writes every secret through. `ManagerOptions.remoteAuthority` is the hosted manager-service authority bundle, including host-owned release, retained-validation, goal-index, and serve-time admin-authorization callbacks. |
 | `ManagerOptions.pooled` | `@cotal-ai/manager` | require signerless remote authority and either an explicit non-custodial runtime or `execution: "none"`. A pooled composition must supply the assigned account key and all-duty renewal callback; the CLI's default remains unchanged. A signed-in human's manager gets that material from `managerServiceAuthority`. A platform-run control manager gets it from `AuthServiceHandle.platformControlAuthority` with the shipped `remoteManagerClient` builders, as the [platform control authority](design/platform-pooled-control-authority.md) design describes. |
+| `ManagerStatus` *(type)* | `@cotal-ai/manager` | verified status payload, including optional advisory `host` and `version` from the answering Manager. Older payloads may omit them. |
 | `ManagerOptions.execution` | `@cotal-ai/manager` | omitted or `"runtime"` keeps runtime execution. Explicit `"none"` requires pooled, complete signerless authority and no `runtime` option. It constructs no Runtime and performs no connector inspection, seat launch or workflow hosting. |
 | `createRuntime`, `Runtime` *(type)* | `@cotal-ai/manager` | resolve the spawn backend (pty built in). |
 | `liveKvEntries(kv, filterOrOptions?, options?)`, `LiveKvEntriesOptions` *(type)* | `@cotal-ai/core` | read live KV entries in one finite scan. Pass `{ signal }` as the second argument or after a key filter to cancel. An interrupted scan throws `IncompleteKvScan`; cancellation throws the signal reason, including during an empty-bucket bind. The scan deletes only its owned consumers, including each one nats.js rebuilt from it, after the broker has answered every create those rebuilds sent. A not-found delete counts as gone, a refused one leaves the consumers to broker inactivity expiry (which also covers a crash), and any other delete failure is thrown, as is a not-found delete of a consumer whose create got no reply from the broker before a timeout or a closed connection. A cleanup failure is thrown only when the scan would otherwise return; the scan's own error, its cancellation reason and `IncompleteKvScan` take precedence. |
@@ -320,6 +334,58 @@ received, which it does when a client starts listening. `cotal_connect` adds `wa
 its reply. `GATEWAY_INSTRUCTIONS` is `GATEWAY_CONNECTING` followed by `GATEWAY_LISTENING`, so an
 embedder can say how its conversations listen and keep how they connect.
 
+### Private tool results
+
+[SPEC §13.19](../SPEC.md#1319-private-tool-results) accepts a private, consent-bound read path for
+managed-agent tool results. It is not served or enabled. Core exports the closed
+`ToolResultConsent`, `ToolResultRevocation` and `ToolResultServingMaterial` contracts, their
+parsers, and the frozen `TOOL_RESULTS_CLUSTER` declaration. These parse structure and static
+bindings only. They do not verify a consent signature, establish human proof or read current
+revocation and lifecycle state. The serving material's grant coordinates are not a branded
+`EpServeGrant` and confer no authority. `parseToolResultAnswer` also checks the UTF-8 byte count;
+a schema's character limit alone is not the byte bound.
+
+`@cotal-ai/auth` exports `verifyToolResultHumanProof` for the consent prerequisite. It verifies
+an EdDSA IdP JWT against the existing issuer, audience and key pins, then requires integer-second
+`auth_time` no later than the decision and at most 300 seconds old, plus a signed `amr` array
+containing `pwd`. The host compares elapsed milliseconds without rounding its clock to seconds.
+JWT clock tolerance does not widen this window. Ordinary bearer exchange does
+not require these claims or turn them into consent authority.
+
+The loopback-only `POST /tool-result-human-proof/verify` takes only `{ idpToken, subject }` with
+the host's current capability and no Origin header. The host supplies its authenticated session
+subject. Success returns `{ authorized: true, sub, owner, authTime, exp }`; the owner derives from
+the verified subject, which must match the session. The door verifies proof only. It does not
+sign consent, issue credentials, register a service or serve private content. A host must still
+refuse platform keys and check current membership and lifecycle at consent admission.
+
+A host may opt into consent issuance with `startAuthService({ ..., toolResultConsents: { keyId,
+resolveAnchor } })`. Provision its Ed25519 nkey seed under `toolResultConsentKey(space)` in the
+injected private store as `{ ver: 1, keyId, seed }`. The resolver reads that space's current
+`consents` anchor with scope `tool-results`. Missing, corrupt, revoked or mismatched signing
+material refuses. Neither the private store nor the resolver belongs in a worker or client.
+
+The loopback-only `POST /tool-result-consent/issue` requires the current host capability and no
+Origin header. Its closed input is `{ id, idpToken, subject, accountPublicKey, holder, target,
+ttlMs }`. The host resolves those coordinates from its current authenticated membership and
+account assignment. `holder` carries `{ actor, lifecycleUid }`; `target` carries `{ owner,
+actor, lifecycleUid }`. Auth verifies the signed password proof and derives the owner itself,
+requires a current same-owner interactive holder and managed target, and caps the window at
+24 hours. It returns only `{ consent }`, after a create-only `consent.<id>` auth-store write.
+Duplicate ids refuse. A failed or lost acknowledgement returns no consent and never retries.
+The host must not label an unknown outcome completed or resubmit it automatically.
+Only the auth mint writer holds consent-KV publish authority. The environment admission writer
+and remote manager issuer do not inherit that grant. Create-only enforcement remains in the recorder.
+
+This door is absent from the public face. Without the opt-in signer it answers unavailable.
+It installs no serving material, revocation store, caller view, capture or result reader.
+
+Public tool arguments and results remain withheld. Auth and host issuance, Manager material,
+connector capture and the browser caller must each be landed and qualified in the
+[design's owner order](design/private-tool-results.md#9-owner-order), then carried by a stock
+release before activation. Without a complete authoritative revocation snapshot and an established,
+enforced clock-skew bound, the serving commands must answer `unavailable`.
+
 ### Browser control
 
 `@cotal-ai/core/browser-control` describes and invokes an endpoint from a strict-CSP page. The page
@@ -330,6 +396,38 @@ refuses a mismatch or a missing root before writing anything. It supports single
 only, so a command whose closure spans several documents refuses. The generated module imports
 Ajv's runtime helpers (`ajv/dist/runtime/*.js`), so the host's bundler must resolve `ajv` from
 where the host writes that module.
+
+`openBrowserManagerCaller` opens a Manager caller for ONE instance the person selected; there is no
+implicit selection. It takes the broker's websocket URL, the space, the principal and lifecycle the
+bearer is bound to, the instance, and the Manager's contracts generated from
+`managerBrowserContractSource()` (`@cotal-ai/manager`). Authority comes from an `acquire` callback
+that returns the person's own `manager-caller` bearer and the space's sentinel credential; an
+embedding's backend obtains the bearer from the stock exchange with the person's IdP proof. The
+bearer's space, principal, lifecycle and instance are checked before anything is dialled, and the
+describe is pinned to that instance. The view carries only the commands the person's ledger scope
+grants. `spawn`, for example, carries `spawn`, `despawn`, `inspect`, the persona commands and
+`goal-result`, while operator reads such as `status` and `models` come only with `admin`; the broker
+refuses a command the view does not carry. The connection never reconnects on its own; `reopen`
+acquires again and re-checks every pin.
+
+`followGoal` submits a goal command once under an envelope id the host persisted before calling
+it, and follows the goal to its terminal with the stock goal follow. Live progress settles the goal
+only when it comes from the instance and epoch that accepted it; any other terminal settles nothing
+and prompts a read of the goal's own record. `reconcileGoal` reads an
+accepted goal back through the Manager's `goal-result` command, and `verifyGoalResultFact` checks
+the returned fact, including its outcome digest, through Web Crypto. Nothing here retries. Three
+outcomes stay distinct: an error reply is a refusal; a goal accepted but not seen to finish answers
+outcome `unknown` and is read back, never submitted again; a request no instance answered throws
+the stock unanswered error (`unansweredRequest`).
+
+`POST /manager-instances` on the auth service lists the signed-in person's own Manager instances. It
+takes `{ idpToken }`, verifies it as the human exchange does and answers
+`{ v: 1, owner, complete: true, instances: [{ instanceId, placement, state }] }`. `placement` is
+`remote` or `local`; `state` is the verdict the `manager-caller` exchange selects on (`candidate`,
+`not open`, `not registered`, `not this owner's`, `unknown`). A `candidate` is registration
+evidence, not proof that the instance answers; a describe pinned to it is. The route refuses
+browser-origin requests like every exchange route, so a page reaches it through its own backend,
+and a failed gate read answers 503, never an empty list.
 
 ### Remote manager client composition
 
@@ -780,6 +878,13 @@ issuer or callout record, loopback capability, provisioner or manager credential
 manager path crosses. A spawn choice that only the manager's host can honour is refused before
 enrollment: `--resume`, a manifest agent's `continuity: exact`, `--cwd`, and any shared MCP server,
 whether from `--share-tools` or the config default (`--share-tools none` passes).
+
+A delegated manager also refuses a caller-supplied persona `config` override in `resolve-agent`,
+`spawn` and direct `Manager.startAgent` calls. The shared persona resolver refuses before checking
+or reading that path, with `failed-precondition` on the wire and one fixed execution-mode message.
+Pass a named catalog persona instead. This does not change locally executing managers. A resolved
+manifest can still use its own validated, host-materialized persona resource. The wire schemas
+accept no internal `resolved` field that could bypass the config refusal.
 
 The runtime creates one provider resource under `managedRuntimeKey(target)`, writes the handoff into
 it as one 0600 file and the persona beside it, and runs the stock bootstrap there:

@@ -151,8 +151,8 @@ cotal up --user-auth --idp https://idp.example/api/auth \
 ```
 
 The public listener itself still binds `127.0.0.1:7443`; configure the proxy to terminate TLS and
-forward to it. It serves only `/health`, `/jwks`, `/exchange`, `/manager-service-authority`, and
-`/.well-known/cotal-mesh` with the documented methods. It needs no local file capability: the
+forward to it. It serves only `/health`, `/jwks`, `/exchange`, `/manager-service-authority`,
+`/manager-instances`, and `/.well-known/cotal-mesh` with the documented methods. It needs no local file capability: the
 signed IdP JWT or managed-agent actor token is the proof, while the original loopback listener
 remains capability-gated. Add
 `--exchange-trusted-proxy` only when that listener is reachable exclusively through your trusted
@@ -285,6 +285,11 @@ matches the ownership you want, and treat
 
 A broker that crashes under that foreground `up` keeps its mesh record and exits non-zero, so the
 unit's restart takes the repair path against the recorded store rather than starting a second one.
+
+A manager or delivery daemon that crashes keeps its lease until the bucket TTL removes it (10s for
+the manager, 30s for delivery). A repair `up` inside that window waits out the lease when it can show
+the holder is gone, so one run restores both processes. A lease that is renewed during the wait has
+a live holder, and the repair refuses it. See [`up`](cli.md#up).
 
 If the deployment deliberately uses `cotal up --detach` as a boot action, monitor observed state
 instead of the launcher's exit:

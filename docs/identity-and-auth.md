@@ -68,8 +68,8 @@ normative shapes are [SPEC Appendix B](../SPEC.md#appendix-b-profile-acls); in b
 | Profile | Is |
 |---|---|
 | **agent** | The ordinary peer: publishes as itself to its declared channels, reads within its read ACL + its own DM/task inboxes. Its read-only presence and channel-registry watches create and inspect client-managed ordered consumers but cannot delete any consumer on those streams; the broker removes a finished watch's consumer five minutes after its last interest. |
-| **observer** | Read-only chat + presence; DMs invisible. What `cotal console` runs. Holds no consumer delete on any stream it reads, so it cannot remove another principal's watch or the delivery daemon's fan-out consumer; the broker removes its own finished consumers. |
-| **admin** | Elevated *read-only* god-view: sees DMs and anycast live, still writes nothing. A deliberate opt-in (`cotal web`). |
+| **observer** | Read-only chat + presence; DMs invisible. What `cotal console` runs. Its only consumer deletes name its own history readers (`hist_<readerId>_<n>` on CHAT, keyed on its nkey or on the connection the server assigned), so each history read removes its consumers when it ends, and it cannot remove another principal's watch or the delivery daemon's fan-out consumer. The broker removes its finished watch consumers. |
+| **admin** | Elevated *read-only* god-view: sees DMs and anycast live, still writes nothing. A deliberate opt-in (`cotal web`). Deletes its own history readers on CHAT and DM, and no other consumer. |
 | operator-side | Narrow single-purpose creds for the machinery (supervising, provisioning, teardown, delivery); the reference implementation splits these so no one connection can read every DM *and* delete every stream ([security model](security.md)). |
 | **run-driver** | One workflow run and takeover attempt: its journal subject, replay durable and run-owned record writes. Store reads and effects go through the host. |
 | **run-mediator** | The trusted hosting process's separate connection for workflow effects and leader reads. It exposes journal-checked, run-bound operations and never hands its credential to the driver. |
@@ -241,7 +241,7 @@ That listener still binds `127.0.0.1`; put a reverse proxy in front of it and te
 In-process TLS is deliberately not another deployment mode: it would duplicate certificate renewal
 and fork proxy-based deployments.
 
-The loopback face also serves three host-only doors, all capability-gated and never on the public
+The loopback face also serves four host-only doors, all capability-gated and never on the public
 face. Two retire a lifecycle: `/interactive-lifecycle/retire` (used by `cotal actor grant/revoke`)
 and `/managed-lifecycle/retire`, which finishes a managed agent's terminal retirement after its
 remote manager is gone. The third decides one:
@@ -257,10 +257,15 @@ the service process, so no signing material reaches the caller, and it returns
 answering a manager-lifecycle phase for an agent-lifecycle request. The same door decides the hosted
 runtime create and status kinds. For those it reads the manager actor's ledger row itself and returns
 `{ authorized: true, owner, instanceId, actor, target }`.
-[embedding.md](embedding.md) documents the managed doors' contracts.
+The fourth, `POST /tool-result-human-proof/verify`, decides a pinned password proof for the
+host's authenticated session subject without issuing consent or credentials.
+The opt-in `POST /tool-result-consent/issue` door signs and records a same-owner consent
+under a host-custodied scoped anchor. It returns no result content, private key or capability.
+[embedding.md](embedding.md) documents these host doors' contracts.
 
 The public listener has a closed surface: `GET /health`, `GET /jwks`, `POST /exchange`,
-`POST /manager-service-authority`, and `GET /.well-known/cotal-mesh`; every other path is 404. It
+`POST /manager-service-authority`, `POST /manager-instances`, and `GET /.well-known/cotal-mesh`;
+every other path is 404. It
 does **not** require the loopback
 capability. That capability proves same-uid access to a 0600 local file and has no remote meaning;
 on the public face the credential is the proof. A human presents an EdDSA IdP JWT checked against
@@ -268,8 +273,11 @@ the pinned JWKS, issuer, and audience. An agent presents its spawn-time actor to
 match a fresh managed-ledger row. The public face mints two elevated views, both still gated on
 ledger scope `admin`: `channel-writer` (`cotal channels set/default`) and `channel-purger` (the
 dashboard's per-click channel delete). It also mints the narrowing `manager-caller` view for humans
-or managed agents. That view adds no capability and binds the bearer to one live registered manager
-instance. God-view (`admin`), space-history `purger`, `deployer`, and `manager-service` stay
+or managed agents. That view binds the bearer to one live registered manager instance. It adds no
+capability, except that a `spawn` holder's view may read that manager's `status`, `models` and
+`resolve-cwd`, which a host-local launch there needs. A manager using a delegated runtime refuses
+host cwd resolution before filesystem lookup because its seats execute outside that host.
+God-view (`admin`), space-history `purger`, `deployer`, and `manager-service` stay
 loopback-only. A managed-agent secret exchange refuses every other view. This is not full remote channel management: `cotal web` still
 mints the read-only admin view at startup, so a remote dashboard that needs that god-view still
 fails even when a later delete would mint `channel-purger`.
@@ -576,6 +584,14 @@ const bridge = createIdpBridge({
   authorizeActor: (owner, actor) => grantFromLedger(owner, actor), // your ledger, returns an ActorGrant
 });
 ```
+
+For private-result consent, `verifyToolResultHumanProof` applies the separate password-freshness
+rule to the same pinned signature check. A signed integer-second `auth_time` must be no later
+than the decision and at most 300 seconds old, and signed `amr` must contain `pwd`. Neither a
+recent JWT `iat` nor a session's creation time supplies password provenance. Missing, malformed,
+future or stale provenance refuses this decision without changing ordinary bearer exchange.
+The host-only proof door and the remaining activation limits are documented under
+[private tool results](embedding.md#private-tool-results).
 
 ## Joining
 

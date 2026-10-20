@@ -1,3 +1,5 @@
+import { registryStores } from "./lifecycle-registry.js";
+import { createToolResultConsentSigner, makeToolResultConsentRecorder, type ToolResultConsentRecorder, type ToolResultConsentSignerOptions } from "./tool-result-consent.js";
 /**
  * The AUTH SERVICE daemon — the one server-side process a user-auth space runs alongside its broker
  * (the delivery-daemon pattern: spawned detached by `cotal up`, pid-filed per space, torn down by
@@ -69,7 +71,7 @@ import { makePlatformControlAuthority, makePlatformControlReadiness, requireMana
 import { OwnedConnections, type AuthConnectionState, type AuthServiceClosed } from "./owned-connections.js";
 import { makePlatformSupervisorAuthority, makePlatformSupervisorEnd, platformSupervisorEnded, requirePlatformSupervisorAdmin, type PlatformSupervisorInput, type PlatformSupervisorAuthorityRequest } from "./platform-supervisor.js";
 import { startAuthCallout } from "./callout.js";
-import { createIdpBridge, verifyIdpToken, type IdpBridge } from "./idp.js";
+import { createIdpBridge, verifyIdpToken, verifyToolResultHumanProof, type IdpBridge } from "./idp.js";
 import { PUBLIC_EXCHANGE_VIEWS, assertTransferWriterClaim, type UserTokenSession, type UserTokenView, type ValidatedUserToken } from "./token.js";
 import { grantCoordinates, verifySessionRedemption } from "./session-redemption.js";
 import { pinnedJwksResolver, type UserTokenIssuer } from "./issuer.js";
@@ -144,6 +146,12 @@ export const MANAGED_RETIRE_PATH = "/managed-lifecycle/retire";
  *  derives the caller's scope from the local ledger and never accepts one from the caller. */
 export const VERIFY_ENROLLMENT_PATH = "/manager-service-authority/verify-enrollment";
 
+/** Host-only, capability-gated proof decision. It neither signs consent nor serves results. */
+export const TOOL_RESULT_HUMAN_PROOF_PATH = "/tool-result-human-proof/verify";
+
+/** Host-only signed consent issuance, never private result content. */
+export const TOOL_RESULT_CONSENT_PATH = "/tool-result-consent/issue";
+
 /** Failed-exchange rate limit: at most this many REFUSED exchanges per rolling minute; further
  *  attempts get 429 until the window drains. Successes are unthrottled (the CLI's normal path). */
 const FAILED_EXCHANGE_PER_MIN = 30;
@@ -184,6 +192,25 @@ const MANAGER_PIN_REMEDY: Record<ManagerCaller | "wire", string> = {
   wire: "name one as managerInstanceId",
 };
 
+/** One Manager instance of an owner, as `/manager-instances` lists it. `state` is the verdict
+ *  selection reads: `candidate` is an open gate of this owner whose current service registration and
+ *  status match the gate's registration revision and process epoch. That is registration evidence,
+ *  not proof the instance answers now; a describe pinned to the instance proves that. */
+export interface ManagerInstanceRecord {
+  instanceId: string;
+  /** `remote` is an owner-registered Manager (`cotal supervise`); `local` is this host's own. */
+  placement: "remote" | "local";
+  state: "candidate" | "unknown" | "not open" | "not this owner's" | "not registered";
+}
+
+/** Every Manager gate of one owner at one scan. A failed scan is an error, never a partial list. */
+export interface ManagerInstanceCatalog {
+  v: 1;
+  owner: string;
+  complete: true;
+  instances: ManagerInstanceRecord[];
+}
+
 /** The service's AUTHORITY PLANE (R1, SPEC 13.1): the two self-minted data-account connections
  *  behind (a) the composed connect authorizer — the file-ledger arm PLUS the credential deny-new
  *  arm through the supervised, shape-proved reader — and (b) the exchange-time root-credential
@@ -193,10 +220,13 @@ export interface AuthAuthorityPlane {
   /** The callout's required native-key issuance recorder (SPEC 13.1 `natkey.`): create-only, then
    *  the same connect authority re-read before the minted JWT may leave. */
   recordIssuance: NativeIssuanceRecorder;
+  recordToolResultConsent: ToolResultConsentRecorder;
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
   /** `caller` picks the remedy an ambiguity refusal names: `--on` for the human (CLI) arm,
    *  `cotal agent-bearer`'s `--manager-instance` for the agent arm, the wire field otherwise. */
   selectManagerInstance: (owner: string, requested?: string, caller?: ManagerCaller) => Promise<string>;
+  /** The owner's Manager instances with the verdict selection reads; selection is built on it. */
+  listManagerInstances: (owner: string) => Promise<ManagerInstanceCatalog>;
   authorizeManagerCaller: (owner: string, instanceId: string) => Promise<void>;
   /** The callout's issuance of an interactive user's `manager-caller` view (SPEC 13.15): one
    *  issuer window that stages and releases evidence bound to the actor-ledger row and writes the
@@ -637,6 +667,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
   // the FRESH space-manager-lease holder check) and dispatches.
   const authAdmin = await openAuthAdminListener({ onConnection, server, space, dataAccount, reg: barrierReg, retirement, barrierFlight: retirementFlights, instanceId: authServeInstanceId, epoch: authServeGrant.epoch, grant: authServeGrant, log });
   unwind.push(() => authAdmin.close());
+  const recordToolResultConsent = makeToolResultConsentRecorder(registryStores(registry).authKv, () => refuseIfFenced(), space);
   const fileArm = ledgerAuthorizeConnect(opts.dir);
   // The callout's issuance evidence: create-only natkey row, then the connect authority re-read
   // in the same stream before the minted JWT may leave.
@@ -723,17 +754,9 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
     if (status.observedSpecRevision < rec.revision || status.epoch !== gate.processEpoch) return "not registered";
     return "candidate";
   };
-  const selectManagerInstance = async (owner: string, requested?: string, caller?: ManagerCaller): Promise<string> => {
+  const listManagerInstances = async (owner: string): Promise<ManagerInstanceCatalog> => {
     refuseIfFenced();
-    if (requested !== undefined) {
-      const instanceId = assertLifecycleToken(requested, "managerInstanceId");
-      const verdict = await managerGate(owner, instanceId);
-      if (verdict !== "candidate") throw new Error(`manager instance ${instanceId} is ${verdict}`);
-      return instanceId;
-    }
-    const remoteInstances: string[] = [];
-    const remoteLive: string[] = [];
-    let localCandidate: string | undefined;
+    const instances: ManagerInstanceRecord[] = [];
     const localManager = loadLocalManager();
     for (const raw of await scanner.scanManagerGates()) {
       if (raw.op !== undefined) continue;
@@ -743,13 +766,25 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       const instanceId = assertLifecycleToken(parts[2], "managerInstanceId");
       const row = parseEndpointGate(raw.data, raw.key);
       if (row.authorityFamily === "environment-manager") continue;
-      if (row.principal === `${owner}.${remoteManagerActors(instanceId).serve}`) {
-        remoteInstances.push(instanceId);
-        if (await managerGate(owner, instanceId) === "candidate") remoteLive.push(instanceId);
-      } else if (localManager?.instanceId === instanceId && row.principal === `local.${localManager.serveIdentity.id}`) {
-        if (await managerGate(owner, instanceId) === "candidate") localCandidate = instanceId;
-      }
+      if (row.principal === `${owner}.${remoteManagerActors(instanceId).serve}`)
+        instances.push({ instanceId, placement: "remote", state: await managerGate(owner, instanceId) });
+      else if (localManager?.instanceId === instanceId && row.principal === `local.${localManager.serveIdentity.id}`)
+        instances.push({ instanceId, placement: "local", state: await managerGate(owner, instanceId) });
     }
+    return { v: 1, owner, complete: true, instances };
+  };
+  const selectManagerInstance = async (owner: string, requested?: string, caller?: ManagerCaller): Promise<string> => {
+    refuseIfFenced();
+    if (requested !== undefined) {
+      const instanceId = assertLifecycleToken(requested, "managerInstanceId");
+      const verdict = await managerGate(owner, instanceId);
+      if (verdict !== "candidate") throw new Error(`manager instance ${instanceId} is ${verdict}`);
+      return instanceId;
+    }
+    const { instances } = await listManagerInstances(owner);
+    const remoteInstances = instances.filter((i) => i.placement === "remote").map((i) => i.instanceId);
+    const remoteLive = instances.filter((i) => i.placement === "remote" && i.state === "candidate").map((i) => i.instanceId);
+    const localCandidate = instances.findLast((i) => i.placement === "local" && i.state === "candidate")?.instanceId;
     remoteLive.sort();
     if (remoteLive.length === 1) return remoteLive[0];
     if (remoteLive.length > 1)
@@ -819,11 +854,13 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       refuseIfFenced();
       return recordIssuance(i);
     },
+    recordToolResultConsent,
     mintConnectCredential: (args) => {
       refuseIfFenced();
       return ensureRootCredential(registry, { ...args, managerInstance: `auth-service:${space}` });
     },
     selectManagerInstance,
+    listManagerInstances,
     authorizeManagerCaller: async (owner, instanceId) => {
       refuseIfFenced();
       const verdict = await managerGate(owner, assertLifecycleToken(instanceId, "managerInstanceId"));
@@ -2013,6 +2050,8 @@ export async function startAuthService(inputs: HostedContextInputs & {
   /** Trusted-host only. Forwarded unchanged to {@link openAuthAuthorityPlane}, which bounds it to
    *  5..86400 seconds. Absent: the 24h default. No CLI flag and no request field sets it. */
   standingRenewableTtlSeconds?: number;
+  /** Opt-in trusted-host consent signer, with seed material already in the private store. */
+  toolResultConsents?: ToolResultConsentSignerOptions;
 }): Promise<AuthServiceHandle> {
   if (!inputs.context?.accountPublicKey || !inputs.context.lifecycleUid || !inputs.space || !inputs.servers || !inputs.stateDir)
     throw new Error("auth-service: hosted context needs an account, lifecycle, space, server and stateDir");
@@ -2023,6 +2062,10 @@ export async function startAuthService(inputs: HostedContextInputs & {
     throw new Error("auth-service: hosted SecretStore identity does not match the assigned store identity");
   const port = inputs.port ?? 0;
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`auth-service: port must be a port number, got ${port}`);
+  if (inputs.toolResultConsents !== undefined &&
+      (!inputs.toolResultConsents || typeof inputs.toolResultConsents.keyId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,200}$/.test(inputs.toolResultConsents.keyId) || typeof inputs.toolResultConsents.resolveAnchor !== "function"))
+    throw new Error("auth-service: tool-result consent signer requires a key id and fresh anchor resolver");
   if (inputs.platformControl !== undefined && typeof inputs.platformControl?.observeAssignment !== "function")
     throw new Error("auth-service: platformControl requires an observeAssignment function");
   const host = inputs.platformControl?.host;
@@ -2047,6 +2090,7 @@ export async function startAuthService(inputs: HostedContextInputs & {
     ...(inputs.platformControl !== undefined ? { platformControl: inputs.platformControl } : {}),
     ...(inputs.platformSupervisor !== undefined ? { platformSupervisor: inputs.platformSupervisor } : {}),
     ...(inputs.standingRenewableTtlSeconds !== undefined ? { standingRenewableTtlSeconds: inputs.standingRenewableTtlSeconds } : {}),
+    ...(inputs.toolResultConsents !== undefined ? { toolResultConsents: inputs.toolResultConsents } : {}),
   });
   return { ...started.handle, readiness: (): HostedServiceState => ({ ...started.status(), context: inputs.context }) };
 }
@@ -2058,6 +2102,7 @@ type AuthContextEnd = { kind: "fenced"; cause: string } | { kind: "broker"; caus
 type AuthContextStatus = { state: "ready" | "draining" } | { state: "unavailable"; cause: string };
 
 interface AuthContextOptions {
+  toolResultConsents?: ToolResultConsentSignerOptions;
   space: string;
   server: string;
   port: number;
@@ -2170,7 +2215,12 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
     let publicUrl: string | undefined;
     const failures: number[] = []; // rolling-window timestamps of REFUSED exchanges
     const badCaps: number[] = []; // rolling-window timestamps of invalid-capability attempts
+    const issueToolResultConsent = o.toolResultConsents === undefined ? undefined : createToolResultConsentSigner({
+      space, accountPublicKey: keys.dataAccount.pub, dir, store: secrets, idp: bridgeIdp, ownerSecret,
+      signer: o.toolResultConsents, record: plane.recordToolResultConsent,
+    });
     const ctx: HandlerCtx = {
+      ...(issueToolResultConsent ? { issueToolResultConsent } : {}),
       issuer,
       bridge,
       bridgeIdp,
@@ -2202,6 +2252,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
       dir,
       mintConnectCredential: plane.mintConnectCredential,
       selectManagerInstance: plane.selectManagerInstance,
+      listManagerInstances: plane.listManagerInstances,
       verifySession: plane.verifySession,
     };
     const loopback = createServer((req, res) => void handle(req, res, ctx));
@@ -2438,6 +2489,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
 type HumanHolder = Extract<ManagerAuthorityHolder, { scope: string[] }>;
 
 interface HandlerCtx {
+  issueToolResultConsent?: (raw: unknown) => Promise<import("@cotal-ai/core").ToolResultConsent>;
   issuer: UserTokenIssuer;
   bridge: IdpBridge;
   bridgeIdp: { issuer: string; audience: string; key: ReturnType<typeof pinnedJwksResolver> };
@@ -2468,6 +2520,7 @@ interface HandlerCtx {
    *  human arm stamps inside the bridge). */
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
   selectManagerInstance: AuthAuthorityPlane["selectManagerInstance"];
+  listManagerInstances: AuthAuthorityPlane["listManagerInstances"];
   verifySession: AuthAuthorityPlane["verifySession"];
 }
 
@@ -2645,16 +2698,19 @@ const ROUTES = new Map<string, RouteHandler>([
   ],
   ["/exchange", (req, res, ctx) => handleExchange(req, res, ctx, LOOPBACK_POLICY)],
   ["/manager-service-authority", (req, res, ctx) => handleManagerServiceAuthority(req, res, ctx, LOOPBACK_POLICY)],
+  ["/manager-instances", (req, res, ctx) => handleManagerInstances(req, res, ctx, LOOPBACK_POLICY)],
   [INTERACTIVE_RETIRE_PATH, handleInteractiveLifecycleRetirement],
   [MANAGED_RETIRE_PATH, handleManagedLifecycleRetirement],
   [VERIFY_ENROLLMENT_PATH, handleVerifyManagedAgentEnrollment],
+  [TOOL_RESULT_HUMAN_PROOF_PATH, handleToolResultHumanProof],
+  [TOOL_RESULT_CONSENT_PATH, handleToolResultConsent],
 ]);
 
 /** Route one HTTP request against the loopback route table. Errors are JSON `{ error }`. */
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx): Promise<void> {
   try {
     const route = ROUTES.get(req.url ?? "");
-    if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-service-authority/verify-enrollment, /interactive-lifecycle/retire, /managed-lifecycle/retire" });
+    if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-instances, /manager-service-authority/verify-enrollment, /interactive-lifecycle/retire, /managed-lifecycle/retire" });
     await route(req, res, ctx);
   } catch (e) {
     sendRequestError(res, e);
@@ -2993,6 +3049,41 @@ async function handleExchange(req: IncomingMessage, res: ServerResponse, ctx: Ha
   }
 }
 
+/** The signed-in person's own Manager instances, read-only, on both faces. The proof is the IdP JWT
+ *  the human exchange verifies, and the owner is derived from it the same way, so a caller lists only
+ *  its own owner's gates. A browser-origin request is refused as on every exchange route; an
+ *  embedding's server-side bridge forwards the person's proof. Issuance still re-checks the chosen
+ *  instance. */
+async function handleManagerInstances(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx, policy: ExchangePolicy): Promise<void> {
+  if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+  if (req.headers.origin !== undefined) return send(res, 403, { error: "browser-origin requests are not served here" });
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? ""))
+    return send(res, 415, { error: "content-type must be application/json" });
+  if (policy.requireCapability && req.headers.authorization !== `Bearer ${ctx.cap}`)
+    return refuseCapability(res, ctx, "missing/invalid exchange capability - read it from the space's auth-service.json");
+  const peer = policy.peerKey(req);
+  const peerThrottled = policy.throttled(ctx, peer);
+  const body = await readJsonBody(req) as { idpToken?: unknown } | null;
+  if (typeof body?.idpToken !== "string" || !body.idpToken)
+    return send(res, 400, { error: "the manager instance list needs { idpToken: string }" });
+  let owner: string;
+  try {
+    owner = deriveOwnerForIdpSubject(ctx.ownerSecret, ctx.bridgeIdp.issuer, (await verifyIdpToken(body.idpToken, ctx.bridgeIdp)).sub);
+  } catch (e) {
+    policy.recordFailure(ctx, peer);
+    const reason = e instanceof Error ? e.message : String(e);
+    console.error(`auth-service: refused a manager instance list: ${reason}`);
+    if (peerThrottled) return send(res, 429, { error: "too many refused exchanges - wait a minute and retry" });
+    return send(res, 401, { error: reason });
+  }
+  try {
+    return send(res, 200, await ctx.listManagerInstances(owner));
+  } catch (e) {
+    // The proof was good and the gate read was not: unavailable, never an empty list.
+    return send(res, 503, { error: `the manager instance list is unavailable: ${e instanceof Error ? e.message : String(e)}` });
+  }
+}
+
 /** What {@link handleManagerServiceAuthority} reads. Exported so a host that serves the route with a
  *  context it builds itself is held by the compiler to every arm the dispatcher calls. `failures`
  *  and `badCaps` are the face's refusal windows, shared with its `/exchange` so neither route is a
@@ -3034,6 +3125,58 @@ export async function handleManagerServiceAuthority(req: IncomingMessage, res: S
     if (peerThrottled)
       return send(res, 429, { error: "too many refused exchanges - wait a minute and retry" });
     return send(res, 403, { error: reason });
+  }
+}
+
+/** Minimal host-held inputs for the proof decision; no signing or storage authority is used. */
+export type ToolResultHumanProofCtx = Pick<HandlerCtx, "cap" | "bridgeIdp" | "ownerSecret" | "badCaps">;
+
+/** Decide one signed password proof against the host's authenticated session subject.
+ * The subject is an equality constraint, never the source of the derived owner. */
+export async function handleToolResultHumanProof(
+  req: IncomingMessage, res: ServerResponse, ctx: ToolResultHumanProofCtx,
+): Promise<void> {
+  if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+  if (req.headers.origin !== undefined) return send(res, 403, { error: "browser-origin requests are not served here" });
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? ""))
+    return send(res, 415, { error: "content-type must be application/json" });
+  if (req.headers.authorization !== `Bearer ${ctx.cap}`)
+    return refuseCapability(res, ctx, "missing/invalid exchange capability - human proof verification is a loopback host action");
+  let body: unknown;
+  try { body = await readJsonBody(req); }
+  catch (error) { return send(res, error instanceof RequestBodyError ? error.status : 400, { error: "invalid human proof request" }); }
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some(key => key !== "idpToken" && key !== "subject") ||
+      !("idpToken" in body) || typeof body.idpToken !== "string" || !body.idpToken ||
+      !("subject" in body) || typeof body.subject !== "string" || !body.subject)
+    return send(res, 400, { error: "human proof verification needs only { idpToken, subject }" });
+  try {
+    const proof = await verifyToolResultHumanProof(body.idpToken, ctx.bridgeIdp);
+    if (proof.sub !== body.subject) return send(res, 403, { error: "human proof subject does not match the session" });
+    const owner = deriveOwnerForIdpSubject(ctx.ownerSecret, ctx.bridgeIdp.issuer, proof.sub);
+    return send(res, 200, { authorized: true, owner, ...proof });
+  } catch {
+    return send(res, 403, { error: "fresh signed password proof required" });
+  }
+}
+
+/** Consent issuance is confined to the authenticated host face and uses sanitized refusals. */
+export async function handleToolResultConsent(req: IncomingMessage, res: ServerResponse,
+  ctx: Pick<HandlerCtx, "cap" | "badCaps" | "issueToolResultConsent">): Promise<void> {
+  if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+  if (req.headers.origin !== undefined) return send(res, 403, { error: "browser-origin requests are not served here" });
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? "")) return send(res, 415, { error: "content-type must be application/json" });
+  if (req.headers.authorization !== `Bearer ${ctx.cap}`)
+    return refuseCapability(res, ctx, "missing/invalid exchange capability - consent issuance is a loopback host action");
+  if (!ctx.issueToolResultConsent) return send(res, 503, { error: "tool-result-consent-unavailable", outcome: "not-executed" });
+  let body: unknown;
+  try { body = await readJsonBody(req); }
+  catch { return send(res, 400, { error: "invalid consent request", outcome: "not-executed" }); }
+  try { return send(res, 200, { consent: await ctx.issueToolResultConsent(body) }, { "cache-control": "no-store" }); }
+  catch (error) {
+    const code = error instanceof EpEnvelopeError ? error.code : "unavailable";
+    const status = code === "bad-request" ? 400 : code === "permission-denied" ? 403 : code === "conflict" ? 409 : 503;
+    return send(res, status, { error: `tool-result-consent-${code}`, outcome: error instanceof EpEnvelopeError ? error.outcome ?? "unknown" : "unknown" });
   }
 }
 
@@ -3153,6 +3296,7 @@ function makePublicHandler(
     ],
     ["/exchange", (req, res, c) => handleExchange(req, res, c, policy)],
     ["/manager-service-authority", (req, res, c) => handleManagerServiceAuthority(req, res, c, policy)],
+    ["/manager-instances", (req, res, c) => handleManagerInstances(req, res, c, policy)],
     [
       "/.well-known/cotal-mesh",
       (req, res) => {
@@ -3181,7 +3325,7 @@ function makePublicHandler(
     void (async () => {
       try {
         const route = routes.get(req.url ?? "");
-        if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /.well-known/cotal-mesh" });
+        if (!route) return send(res, 404, { error: "unknown path - /health, /jwks, /exchange, /manager-service-authority, /manager-instances, /.well-known/cotal-mesh" });
         await route(req, res, ctx);
       } catch (e) {
         if (!res.headersSent) sendRequestError(res, e);

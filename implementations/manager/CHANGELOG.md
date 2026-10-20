@@ -1,5 +1,106 @@
 # @cotal-ai/manager
 
+## 0.88.0
+
+### Minor Changes
+
+- 25d9e94: Managers using a delegated runtime now refuse caller-supplied persona `config` overrides before looking up or reading the requested host path. `resolve-agent` and `spawn` return the same `failed-precondition` message for every path shape. Direct `Manager.startAgent` calls share the refusal. Select a named catalog persona instead. Locally executing managers and validated resolved-manifest resources retain their behavior.
+
+  This changes a previously accepted launch option and ships as a pre-1.0 minor release. Upgrade the Manager to apply the guard. No auth-service change is required.
+
+- 592d07b: Report the answering Manager's host name and running package version in verified status. Export the ManagerStatus type and keep both advisory fields optional for older status payloads.
+
+### Patch Changes
+
+- Updated dependencies [fc923a5]
+- Updated dependencies [cb09213]
+- Updated dependencies [a3ae00f]
+  - @cotal-ai/workspace@0.88.0
+  - @cotal-ai/core@0.88.0
+  - @cotal-ai/seat@0.88.0
+
+## 0.87.0
+
+### Minor Changes
+
+- 0f92fa4: A person who may spawn on their own Manager can now read what a launch there needs. A `manager-caller` view whose actor holds `spawn` carries the Manager's `status`, `models` and `resolve-cwd` commands on its one pinned instance. Before, those reads needed `admin`, and no view carried `resolve-cwd`, so a launch dialog that reads the Manager's connectors, model catalogs and a working directory was refused at the broker. A `run`-only or no-scope view gains nothing, `ps` and `slots` stay with `admin`, and the standing `spawn` set that reaches every Manager on the class rail is unchanged.
+
+  A Manager whose runtime delegates seats outside its host refuses `resolve-cwd` before filesystem lookup. Every path gets the same execution-mode refusal, since delegated seats cannot use a Manager-host working directory.
+
+  A user mesh's co-located Manager answers every owner's view, so its `status` now counts only the caller's own seats, as `ps` would list them, unless the caller holds `admin`. A remote Manager's seats all belong to its owner, and its count is unchanged. The auth service mints the view, so the new reads arrive with its upgrade. On a self-hosted user mesh, restart the Manager on this release with or before the auth service, so the count is bounded and delegated host cwd resolution is refused before the reads are minted.
+
+### Patch Changes
+
+- 70aa27b: A repair `cotal up` after a crash now restores the manager and the delivery daemon in one run. A
+  manager or delivery daemon that is killed, or a daemon that exits because its broker went away,
+  cannot release its lease, and a replacement started inside the lease TTL used to lose the create and
+  make `up` exit 1. The new manager now waits out a lease row that names its workspace root and a pid
+  that is not running on the host, and `up` waits out a delivery lease held by the credential the
+  folder gave its previous daemon while no daemon is recorded running. The wait never writes the
+  lease: a row that is written again during it has a live holder and is refused, and a row held by
+  anyone else is refused at once as before.
+- aae54dd: A seat spawned with `supervise` now survives its manager's death. When a manager ends without stopping the seat (a crash, or a pty seat that ended with it), the next manager of the same instance restarts the seat under the same name, lifecycle uid, credential, persona and cwd and counts it as one restart of the policy, so a workflow run resumed by that manager finishes its interrupted `turn` instead of failing it with L4002. The manager keeps what that restart needs in `.cotal/seat-records/<space>/<name>.json` while the seat runs. A seat whose budget is spent, or whose persona file or credential changed or expired, is retired as before. A seat resumed from a preserved inventory now also keeps the nkey seed its credential renewal needs: the manager read it with a pattern that matched no real creds file.
+- 8fc9dca: A tmux seat that outlives its manager is now adopted by the next manager instead of closed. The manager records each adoptable seat, and on startup the successor checks the recorded tmux server, window and pane, then manages the seat again under its existing credential so a run's pending turn continues on it. A seat whose pane has exited is retired as before.
+- Updated dependencies [e84b6c6]
+- Updated dependencies [c06cf5b]
+- Updated dependencies [af82e8d]
+- Updated dependencies [0f92fa4]
+- Updated dependencies [5d686ff]
+- Updated dependencies [970bf2d]
+- Updated dependencies [9755079]
+- Updated dependencies [70aa27b]
+- Updated dependencies [e6bb48f]
+  - @cotal-ai/core@0.87.0
+  - @cotal-ai/workspace@0.87.0
+  - @cotal-ai/seat@0.87.0
+
+## 0.86.0
+
+### Patch Changes
+
+- 6bec40e: The manager's doc comment on its launch capability check now says spawn and resume both ask before a seat's launch is built. It used to say they ask before any reserve or mint, which resume does not do: its batch reserves the retained names before the check runs. No behavior changes.
+- b7f4af7: `@cotal-ai/core` now exports `digestIdToken`, the one recipe behind every id derived from a digest (the 43-character base64url sha256). Run notice and migration ids, checkpoint answer ids, the runtime's derived pause tokens and the manager's turn hold token all use it. Before this, each module kept its own copy, so a change to one copy could pass the typecheck and quietly stop matching the ids the others derive. The derived ids are unchanged.
+- 21fc39f: The instance-pin smoke grades its two recovery-counter cells against the re-issues that left the caller. In a two-manager space a re-issue rides the same class queue and can be refused again, so one call may recover several splits, and the cells asserted exactly one and went red on correct runs. Each now requires the counter to move and to equal the number of re-issued requests. No behavior changes.
+- 21fc39f: The instance-pin smoke's admin sweep now sends `transcript-receive` schema-valid nonsense arguments: a random digest, size 0, and session and host names that match nothing. It used to send `{}`, which the envelope refused on `required` before publishing, so the command never reached a responder and the cell that proves every admin command reaches the guard failed on every run. No behavior changes.
+- 425a5e9: `@cotal-ai/manager` now exports `managerBrowserContractSource()`, the manager's registered cluster document with its closure digest and each distinct schema root. A host passes it to `generateBrowserContracts` from `@cotal-ai/core/browser-validators-build` to build the manager's browser validators. Before, the root exported only the document and digests, so no supported import carried the schema roots. Served commands, digests, wire, auth and runtime behavior are unchanged.
+- 88dcd93: Remove the internal review attributions from the static lifecycle module's comments, which the published build carried. Each comment keeps the reason it gives.
+- d4a745f: Smoke comments and check labels in core, cli and manager name the function, branch or SPEC section they point at instead of a line number that drifts with every edit above it. No behavior changes.
+- a65de85: The manager no longer keeps every spawn acceptance for the life of its process. An acceptance is dropped five minutes after its goal ends, and an in-flight goal's acceptance is never dropped. A resubmission of a goal that has ended is answered from the goal's terminal and is never accepted again: a `succeeded` goal returns the same acceptance, and any other outcome is refused `failed-precondition` with its terminal attached. Before, a resubmission the manager no longer held in memory, such as one after a restart, ran the accept again and was refused with an error telling the caller to reconcile the store.
+- 74cb04f: `cotal supervise --space <s>` now starts on a root that hosts several spaces when `<s>` has no registry entry. The root's account record for `<s>` counted as the host proof only while `<s>` was the root's sole space, so a second space made the manager exit before readiness with the ambiguity error that asks for the space it was given.
+- c39d2a7: `cotal supervise` now handles `SIGTERM` and `SIGINT` from the moment it starts. Before, its handlers were installed only after the manager finished starting, so a signal during startup killed the process with its liveness lease still held: no warning printed, and an immediate restart from the same workspace root was refused with `already serves ... stop it first` until the lease's 10 second TTL lapsed. A signal during startup now waits for the start to settle and runs the normal stop, which releases the lease. The process then exits 0, or, when the start itself failed, prints that error and exits 1.
+- Updated dependencies [598d0dd]
+- Updated dependencies [be2c0d8]
+- Updated dependencies [140c0d4]
+- Updated dependencies [1d92ef7]
+- Updated dependencies [91663dc]
+- Updated dependencies [31dccc4]
+- Updated dependencies [15043fa]
+- Updated dependencies [1dd5baf]
+- Updated dependencies [1fd3cb4]
+- Updated dependencies [fba88b0]
+- Updated dependencies [b7f4af7]
+- Updated dependencies [7a2c574]
+- Updated dependencies [664e9df]
+- Updated dependencies [8d97d8a]
+- Updated dependencies [830d66b]
+- Updated dependencies [516c8f6]
+- Updated dependencies [00f631a]
+- Updated dependencies [ab30526]
+- Updated dependencies [df063ef]
+- Updated dependencies [958e6cb]
+- Updated dependencies [ee42687]
+- Updated dependencies [d4a745f]
+- Updated dependencies [3c0a830]
+- Updated dependencies [4f49cea]
+- Updated dependencies [6d5462d]
+- Updated dependencies [c2e7648]
+- Updated dependencies [12344fb]
+- Updated dependencies [1eaf6e3]
+- Updated dependencies [3b93aa2]
+  - @cotal-ai/core@0.86.0
+  - @cotal-ai/workspace@0.86.0
+  - @cotal-ai/seat@0.86.0
+
 ## 0.85.0
 
 ### Patch Changes

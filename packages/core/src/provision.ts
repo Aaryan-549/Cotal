@@ -51,6 +51,8 @@ import {
   dlvStream,
   inboxStream,
   chatHistDurable,
+  historyReaderConsumer,
+  HISTORY_READERS,
   dmDurable,
   taskDurable,
   dlvDurable,
@@ -68,6 +70,7 @@ import {
   MANAGER_LEASE_KEY,
   MANAGER_RENEWAL_LEASE_KEY,
   connzRequestSubject,
+  accountCensusInboxPrefix,
   accountConnectSubject,
   accountDisconnectSubject,
   MEMBERSHIP_INBOX_PREFIX,
@@ -205,7 +208,7 @@ export type CredentialLifetimeClass =
   | "one-shot"
   | "static-operator-managed"
   | "mixed";
-export type CredentialKind = Profile | "membership-observer" | "connection-evictor";
+export type CredentialKind = Profile | "membership-observer" | "account-census" | "connection-evictor";
 
 export interface CredentialLifetimePolicy {
   class: CredentialLifetimeClass;
@@ -302,6 +305,7 @@ export const CREDENTIAL_LIFETIMES: Record<CredentialKind, CredentialLifetimePoli
   "environment-manager-executor": { class: "standing-renewable", renewalOwner: "environment-authority", note: "own admitted authority instance RPC; explicit expiry capped by admission, no direct store access" },
   "environment-manager-goal-writer": { class: "standing-renewable", renewalOwner: "environment-authority", note: "manager goal rows without the auth-read belt; explicit expiry capped by admission" },
   "membership-observer": { class: "rotation-renewed", defaultTtlSeconds: ROTATION_RENEWED_TTL_SEC, renewalOwner: "system-account rotation", note: "$SYS-account CONNZ observer; NOT online-renewable ($SYS seed dies at `up`) - bounded exp, renewed only by rotateSystemAccount + broker restart; doctor warns near expiry" },
+  "account-census": { class: "one-shot", defaultTtlSeconds: FIVE_MINUTES, note: "Host-only account CONNZ and account-qualified replies; at most five minutes, no KICK or client-side renewal" },
   "connection-evictor": { class: "rotation-renewed", defaultTtlSeconds: ROTATION_RENEWED_TTL_SEC, renewalOwner: "system-account rotation", note: "$SYS-account KICK-only live-eviction cred; same rotation-renewed posture as the observer" },
 };
 // RUNTIME integrity (the afa715b class): the matrix and every policy freeze at module load
@@ -838,6 +842,11 @@ export interface MintPrincipal {
    *  dm/dlv/chathist grants are lifecycle-keyed EXACT names, so a credential cannot name another
    *  incarnation's resources. Other profiles ignore it. */
   lifecycleUid?: string;
+  /** The connection's history-reader id, the key of the observer and admin profiles' reader deletes
+   *  ({@link historyReaderConsumer}). A static mint leaves it unset, because there `connId` is the
+   *  credential's own nkey, which its holder proves by signing. The auth callout sets it to
+   *  {@link calloutReaderId}, because there `connId` is the inbox nonce the client chose. */
+  readerId?: string;
 }
 
 /** Resolve a {@link MintPrincipal} for the STATIC/dev mint path from an {@link Identity} + optional
@@ -1315,23 +1324,31 @@ export function permissionsFor(
       profile === "admin"
         ? [`${spacePrefix(space)}.chat.>`, `${spacePrefix(space)}.inst.>`, `${spacePrefix(space)}.svc.>`, inbox]
         : [`${spacePrefix(space)}.chat.>`, inbox];
+    // History readers (channelHistory, multiChannelHistory, dmHistory) are named consumers keyed on
+    // this connection's reader id (see MintPrincipal.readerId). The profile may delete exactly those
+    // names and no other consumer (#4123): each read deletes its readers when it ends, so polling no
+    // longer fills the stream's consumer limit.
+    const readerId = pr.readerId ?? pr.connId;
+    const readerDeletes = (stream: string) =>
+      Array.from({ length: HISTORY_READERS }, (_, i) => `$JS.API.CONSUMER.DELETE.${stream}.${historyReaderConsumer(readerId, i)}`);
     const allow = [
       "$JS.API.INFO",
       `$JS.API.STREAM.INFO.${CHAT}`,
       `$JS.API.STREAM.INFO.${KV}`,
-      // NO CONSUMER.DELETE on any stream this profile reads (#691). Its consumers are client-named
-      // ordered consumers (`oc_<nuid>_<serial>`, the serial bumped on every rebuild), so the only
-      // expressible grant is stream-wide, and stream-wide let one observer delete another
-      // principal's live watch cursors and the delivery daemon's fan-out durable. The broker reaps
-      // these consumers at their inactive threshold instead, and the client treats a refused
-      // delete of its own ephemeral consumer as that designed outcome.
+      // NO stream-wide CONSUMER.DELETE on any stream this profile reads (#691). Its watch consumers
+      // are client-named ordered consumers (`oc_<nuid>_<serial>`, the serial bumped on every
+      // rebuild), so the only expressible grant for them is stream-wide, and stream-wide let one
+      // observer delete another principal's live watch cursors and the delivery daemon's fan-out
+      // durable. The broker reaps those consumers at their inactive threshold instead, and the
+      // client treats a refused delete of its own watch consumer as that designed outcome.
       //
-      // ephemeral backlog consumer (channelHistory): a multi-filter create can't encode its
-      // filter in the subject → bare form; the .> form covers named consumers.
+      // history reader consumer: a multi-filter create can't encode its filter in the subject → bare
+      // form; the .> form covers the single-filter named create.
       `$JS.API.CONSUMER.CREATE.${CHAT}`,
       `$JS.API.CONSUMER.CREATE.${CHAT}.>`,
       `$JS.API.CONSUMER.INFO.${CHAT}.>`,
       `$JS.API.CONSUMER.MSG.NEXT.${CHAT}.>`,
+      ...readerDeletes(CHAT),
       `$JS.ACK.${CHAT}.>`,
       `$JS.API.CONSUMER.CREATE.${KV}.>`, // kv.watch ordered consumer (roster is public)
       `$JS.API.CONSUMER.INFO.${KV}.>`,
@@ -1367,6 +1384,7 @@ export function permissionsFor(
         `$JS.API.CONSUMER.CREATE.${DM}.>`,
         `$JS.API.CONSUMER.INFO.${DM}.>`,
         `$JS.API.CONSUMER.MSG.NEXT.${DM}.>`,
+        ...readerDeletes(DM),
         `$JS.ACK.${DM}.>`,
       );
     }
@@ -1591,6 +1609,13 @@ export function permissionsFor(
   return { pub: { allow: pubAllow, deny: pubDeny }, sub: { allow: [inbox, deliveryReplies, ...livenessReplies, ...subChat, ...epSub] } };
 }
 
+/** The reads a launch on one Manager needs: `status` (its execution mode and which connectors it
+ * can launch), `models` (their catalogs) and `resolve-cwd` (a directory's canonical form on its
+ * host). A spawn holder learns each by launching there, so a spawn-scoped manager-caller view
+ * carries them on its one pinned instance. The standing spawn set does not: it reaches every
+ * manager in the space through the class rail. */
+const LAUNCH_READ_COMMANDS = Object.freeze(["status", "models", "resolve-cwd"] as const);
+
 /** One seat's manager control view. It carries no agent messaging or delivery surface, and every
  * manager request, including describe, is pinned to one exact registered instance. */
 function managerCallerPermissions(space: string, pr: MintPrincipal, opts: MintOpts): Record<string, unknown> {
@@ -1604,6 +1629,7 @@ function managerCallerPermissions(space: string, pr: MintPrincipal, opts: MintOp
     { endpoint: BASELINE_LIFECYCLE_ENDPOINT, command: "describe" },
     ...baselineCallerCapabilities().filter((cap) => cap.endpoint === BASELINE_LIFECYCLE_ENDPOINT),
     ...(caps.includes("spawn") ? spawnCallerCapabilities(pr.owner) : []),
+    ...(caps.includes("spawn") ? LAUNCH_READ_COMMANDS.map((command) => ({ endpoint: BASELINE_LIFECYCLE_ENDPOINT, command })) : []),
     ...(caps.includes("run") ? runCallerCapabilities(pr.owner) : []),
     ...(caps.includes("admin") ? operatorInstrumentCapabilities("admin", pr.owner) : []),
   ];
@@ -1829,14 +1855,18 @@ function operatorPermissions(space: string, pr: MintPrincipal): Record<string, u
         anycastSubject(space, "*", pr.owner, pr.actor), // svc.*.<o>.<a>   — anycast any role as me
         `$KV.${presenceBucket(space)}.${principalKey(pr.owner, pr.actor).key}`, // own presence key only
         "$JS.API.INFO",
-        // Presence watch (name→id resolution + the live roster) — read-only ordered consumer. No
-        // STREAM.MSG.GET (the roster is the in-memory watch cache).
+        // Presence read (name→id resolution + the roster). The transient endpoint reads the bucket once
+        // with a batched Direct Get, whose request subject is the bare stream (#4091); the consumer rows
+        // serve a watch. No STREAM.MSG.GET.
         `$JS.API.STREAM.INFO.${PKV}`,
+        `$JS.API.DIRECT.GET.${PKV}`,
         `$JS.API.CONSUMER.CREATE.${PKV}.>`,
         `$JS.API.CONSUMER.INFO.${PKV}.>`,
-        // Channel registry read — the transient endpoint opens+watches it, and multicast reads a
-        // channel's delivery class. Read-only (no `$KV.<channel>` write — that's the provisioner).
+        // Channel registry read — the transient endpoint reads it once (batched Direct Get), multicast
+        // reads a channel's delivery class, and `channels list` scans it. Read-only (no `$KV.<channel>`
+        // write — that's the provisioner).
         `$JS.API.STREAM.INFO.${CHKV}`,
+        `$JS.API.DIRECT.GET.${CHKV}`,
         `$JS.API.STREAM.MSG.GET.${CHKV}`,
         // Keyed KV get rides `DIRECT.GET.<stream>.$KV.<bucket>.<key>` — the key is in the SUBJECT, so
         // the grant needs the trailing `.>` (unlike STREAM.MSG.GET, which carries it in the payload).
@@ -2866,6 +2896,28 @@ export async function mintMembershipObserverCreds(auth: SpaceAuth, identity: Ide
   );
   const creds = fmtCreds(userJwt, fromSeed(new TextEncoder().encode(identity.seed)));
   return new TextDecoder().decode(creds);
+}
+
+/** Host-only read-only census credential. A registered system signer is required; no fallback
+ * to a broader observer or eviction credential. Reissuing with a retained registered signer
+ * needs no broker restart. The helper does not discover or persist that signer.
+ */
+export async function mintAccountCensusCreds(
+  auth: { account: { pub: string }; sys: { pub: string; signingSeed?: string } },
+  identity: Identity, opts: MintOpts = {},
+): Promise<string> {
+  const prefix = accountCensusInboxPrefix(auth.account.pub);
+  if (!auth.sys.signingSeed) throw new Error("account census requires the registered system-account signer");
+  const { exp } = userValidDates("account-census", opts), now = Math.floor(Date.now() / 1000);
+  if (exp === undefined || !Number.isSafeInteger(exp) || exp <= now || exp > now + FIVE_MINUTES)
+    throw new Error("account census requires a bounded future credential expiry");
+  const user = fromSeed(new TextEncoder().encode(identity.seed));
+  if (!isUserNkey(identity.id) || user.getPublicKey() !== identity.id) throw new Error("account census identity does not match its user key");
+  const jwt = await encodeUser("account-census", fromPublic(identity.id), fromPublic(auth.sys.pub), {
+    pub: { allow: [connzRequestSubject(auth.account.pub)] }, sub: { allow: [`${prefix}.>`] },
+  }, { signer: fromSeed(new TextEncoder().encode(auth.sys.signingSeed)), exp });
+  if (exp <= Math.floor(Date.now() / 1000)) throw new Error("account census credential expired before release");
+  return new TextDecoder().decode(fmtCreds(jwt, user));
 }
 
 /** The KICK-ONLY connection-evictor permission set — a SYSTEM-account user that can do

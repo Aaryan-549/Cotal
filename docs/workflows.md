@@ -413,7 +413,12 @@ accepted and ignored. `supervise` is the restart policy this host asks the manag
 the duration those deaths are counted in (default `10m`). The manager restarts the process in
 place under the same name, lifecycle uid, persona, worktree and permits; `monitor` does not fire
 for a restart, and `wait(down)` fires only when the seat is gone for good. Spending the budget
-retires the seat, and the next `turn` is the catchable L4002. A policy this host cannot enforce
+retires the seat, and the next `turn` is the catchable L4002. The policy also covers the manager's
+own death. On a static mesh, when the manager ends without stopping the seat (a crash, or a pty seat
+that ended with its manager), the next manager of the same instance restarts the seat the same way
+and counts that as one restart. A turn the dead manager had accepted for the seat is served to the
+restarted seat, so the interrupted turn runs again and finished turns do not. A seat whose budget
+is spent, or whose persona file or credential changed or expired while no manager ran, is retired instead. A policy this host cannot enforce
 (an unknown key, a user-mode seat, or a runtime that cannot respawn a name in place) is refused
 at the spawn rather than accepted and ignored. `events: false` is the workflow form of
 `cotal spawn --no-events`: the seat starts without its AG-UI event plane. A connector that

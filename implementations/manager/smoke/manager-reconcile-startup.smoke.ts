@@ -29,6 +29,7 @@ import {
   CotalEndpoint,
   CONTROL_DELIVERY_ADMIN,
   evictDeniedPrincipalWithCreds,
+  evictDeniedPrincipalsWithCreds,
   mintConnectionEvictorCreds,
   mintCreds,
   mintMembershipObserverCreds,
@@ -182,6 +183,21 @@ try {
       };
     }
     if (req.op === "lifecycleMemberships") return { ok: true, data: { complete: true, channels: [] } };
+    // A restarting manager evicts its superseded serve family as one set (the daemon's batch op),
+    // executed by core's shipped batch sweep.
+    if (req.op === "evictPrincipals") {
+      const principals = (req.args as { principals?: string[] })?.principals ?? [];
+      return {
+        ok: true,
+        data: await evictDeniedPrincipalsWithCreds({
+          servers: broker.servers,
+          observerCreds,
+          evictorCreds,
+          accountId: auth.account.pub,
+          principals,
+        }),
+      };
+    }
     if (req.op !== "evictPrincipal") return { ok: false, error: `unsupported delivery-admin op "${req.op}"` };
     const principal = String((req.args as { principal?: unknown })?.principal ?? "");
     return {
@@ -662,6 +678,15 @@ try {
     const CARD = (id: string) => principalKey("local", id).key;
     const evict = async (req: { op: string; args?: unknown }): Promise<ControlReply> => {
       if (req.op === "lifecycleMemberships") return { ok: true, data: { complete: true, channels: [] } };
+      if (req.op === "evictPrincipals") {
+        const principals = (req.args as { principals?: string[] })?.principals ?? [];
+        return {
+          ok: true,
+          data: await evictDeniedPrincipalsWithCreds({
+            servers: broker.servers, observerCreds, evictorCreds, accountId: auth.account.pub, principals,
+          }),
+        };
+      }
     if (req.op !== "evictPrincipal") return { ok: false, error: `unsupported delivery-admin op "${req.op}"` };
       const principal = String((req.args as { principal?: unknown })?.principal ?? "");
       return {

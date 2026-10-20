@@ -1,5 +1,17 @@
 # @cotal-ai/web
 
+## 0.88.0
+
+## 0.87.0
+
+## 0.86.0
+
+### Patch Changes
+
+- 2779b21: The web events-filter smoke's call-site cell now counts every mention of `chatOnly` in the web server and expects three, the declaration and its two calls. It used to count only `chatOnly(`, so a third call written with a space, a line break, type arguments or `?.(` left it green. No behavior changes.
+- 1eaf6e3: `cotal status --components` now names the HTTP status when the web dashboard's address answers `/api/meta` with a status outside 2xx, such as `HTTP 401`. It used to read the body first, so a plain-text or empty refusal printed `http not answered`. The status row and `cotal web --detach` now send one shared readiness request from `@cotal-ai/workspace` and read its answer the same way. That request no longer follows a redirect, so the readiness header goes only to the recorded address and a 3xx answer is reported as its status, such as `HTTP 302`, where both used to follow it and accept the identity the redirect target answered with.
+- 34443e9: The dashboard's static route now reads a page file before it writes the status line. A missing or unreadable file used to be answered with `200`, `cache-control: no-cache` and an empty body, because the read failed after the status was already sent, so the browser ran an empty script and the page failed later with an unrelated message. It is now answered with the request handler's `500` naming the failed read. Successful responses keep their headers, and the session check still runs before the route.
+
 ## 0.85.0
 
 ## 0.84.0

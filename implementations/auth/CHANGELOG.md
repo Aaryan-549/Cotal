@@ -1,5 +1,95 @@
 # @cotal-ai/auth
 
+## 0.88.0
+
+### Minor Changes
+
+- f2d461b: Add opt-in host-custodied tool-result consent signing and a closed capability-gated admission door. Verify fresh same-owner password proof and current holder and target lifecycles, then record each signed consent id create-only before release. Unknown persistence outcomes return no consent and never retry automatically. Only the auth mint writer receives consent persistence authority. Private result serving remains unavailable.
+
+### Patch Changes
+
+- Updated dependencies [fc923a5]
+- Updated dependencies [cb09213]
+- Updated dependencies [a3ae00f]
+  - @cotal-ai/workspace@0.88.0
+  - @cotal-ai/core@0.88.0
+  - @cotal-ai/lang@0.88.0
+
+## 0.87.0
+
+### Minor Changes
+
+- c06cf5b: History reads on observer and admin credentials no longer leave consumers behind. `channelHistory`, `multiChannelHistory` and `dmHistory` used to read through nats.js ordered consumers that these profiles could not delete, so each read left two or three consumers for five minutes. A dashboard polling history filled the stream's consumer limit, and every later read failed with "maximum consumers limit reached". The reads now use the connection's own reader names, `hist_<readerId>_<n>` with `n` in `0..7`, and delete each reader when its step ends. A static credential's `readerId` is its nkey. Under the auth callout it is the server's id and the client id the server assigned the connection, so a client cannot claim another connection's readers by choosing its inbox nonce. A connection runs at most eight history reads at once per stream, and a read past that waits for a free name. A consumer found under one of the names is never deleted, and a create that returns an existing consumer is never read through; the read moves to a free name.
+
+  The observer profile gains `$JS.API.CONSUMER.DELETE.<CHAT>.hist_<readerId>_<n>` for those eight names, and admin also gains them on `<DM>`. Each row names one consumer of this connection and no other. Breaking: a static observer or admin credential minted before this release has no such row, and a current client's history read on it fails and says to remint it. Remint those files, and upgrade the auth service before or with the hosts that read history on a user-auth mesh. The auth callout's `permissionsFor` hook now receives the connection's reader id as a third argument, and the function `calloutPermissions` returns requires it.
+
+- e84b6c6: The auth service serves `POST /manager-instances` on both faces: the signed-in human's own Manager instances, read-only. It verifies the same IdP proof the human exchange verifies, derives the owner the same way, and answers `{ v: 1, owner, complete: true, instances }`, each instance with its placement and the verdict selection reads (`candidate`, `not open`, `not registered`, `not this owner's`, `unknown`). Selection is now built on the same list, and the plane `openAuthAuthorityPlane` returns gains `listManagerInstances`. A listed candidate is registration evidence, not proof that the instance answers. Browser-origin requests are refused as on every exchange route, and a failed gate read answers 503, never an empty list.
+- 8d513aa: Add a consent-only verifier for pinned signed password authentication within five minutes and a host-only proof decision door. Retain validated authentication provenance without changing ordinary bearer exchange. Private tool-result consent, issuance and serving remain unavailable.
+
+### Patch Changes
+
+- Updated dependencies [e84b6c6]
+- Updated dependencies [c06cf5b]
+- Updated dependencies [af82e8d]
+- Updated dependencies [0f92fa4]
+- Updated dependencies [5d686ff]
+- Updated dependencies [970bf2d]
+- Updated dependencies [9755079]
+- Updated dependencies [70aa27b]
+- Updated dependencies [e6bb48f]
+  - @cotal-ai/core@0.87.0
+  - @cotal-ai/workspace@0.87.0
+  - @cotal-ai/lang@0.87.0
+
+## 0.86.0
+
+### Minor Changes
+
+- be2c0d8: Every auth-callout success now records its broker-generated user key before the minted JWT leaves. `startAuthCallout` takes a required `recordIssuance`, and refuses to start without one. The authority plane's recorder writes one create-only `natkey.<userNkey>` row in the space's auth bucket with the bearer's own space, owner, actor, lifecycle, credential and view and the minted JWT's `iat`/`exp`, then re-checks the connect authority before the response. A failed write, an existing row for the key, or a revocation seen by that re-check is a signed deny. The plane removes rows only after their `exp` plus the clock tolerance, at boot and on a timer (`nativeIssuancePruneMs`, default 60 s), with the bucket's marker TTL on each purge marker; a corrupt row fails the open or fences the plane. Core adds `nativeIssuanceKey`. Connections admitted before this change, and static JWTs, have no row.
+
+### Patch Changes
+
+- f1c80e4: `cotal agent-bearer --manager-call` is now told to name a manager with `--manager-instance <instanceId>` when an owner has more than one live manager. Before, it was told to use the instance argument, which only an agent's tools take. The exchange names `--manager-instance` for every actor-token caller, because `cotal agent-bearer` is that arm's one client, and the connector renames it to the `instance` argument when it runs the command for a tool. The refusal still refuses and still lists the owner's live manager instance ids.
+- 9f12f90: The first IdP pin is now written by exclusive create. Two processes enabling user auth on one state dir at once used to both succeed, each holding its own IdP while `idp.json` named only the last writer. Now one pin wins: the other caller adopts it when it names the same IdP and is refused with the usual re-key message when it does not.
+- b62ddda: When every remote manager an owner registered has exited, the manager-caller refusal now tells the owner to start one with `cotal supervise`. It used to suggest naming an instance with `managerInstanceId`, which cannot revive a dead manager. The call is still refused and is never routed to the local manager.
+- 720a01d: The auth service now records a manager-caller connection's credential expiry in the issued evidence it writes for that connection's generation. After the credential expires, the generation no longer resolves and is refused with `generation <id> expired at <exp> (SPEC 13.15)`. A run admitted while the generation was live keeps its admission and keeps renewing.
+- 56fbdb4: A manager-authority answer whose body is not JSON now fails the request with an error that names the operation, the endpoint and the HTTP status. Before, the client replaced such a body with an empty object, so a 200 answer resolved as an empty result the endpoint never sent, and a refusal read the same as a refusal with an empty JSON body.
+- 8d97d8a: Callers can name a manager instance wherever a user-auth mesh with several live managers for one owner asks them to. `cotal models` and every hosted `cotal run` verb take `--on <instance>`, and MCP `cotal_run` and `cotal_personas` take an `instance` argument under the same rules as `cotal_spawn`'s. A `cotal` command run from a managed seat's shell now selects the manager that launched the seat (`COTAL_MANAGER_INSTANCE`), as the seat's tools already did, unless `--on` names another. The ambiguity refusal still refuses, and now lists the owner's live manager instance ids and names the caller's own remedy: `--on <instanceId>` for the CLI, the `instance` argument for an agent's tools. Before, it named `--manager-instance`, which only `cotal agent-bearer` takes, so none of these callers could answer it.
+- Updated dependencies [598d0dd]
+- Updated dependencies [be2c0d8]
+- Updated dependencies [140c0d4]
+- Updated dependencies [1d92ef7]
+- Updated dependencies [91663dc]
+- Updated dependencies [31dccc4]
+- Updated dependencies [15043fa]
+- Updated dependencies [1dd5baf]
+- Updated dependencies [1fd3cb4]
+- Updated dependencies [fba88b0]
+- Updated dependencies [b7f4af7]
+- Updated dependencies [7a2c574]
+- Updated dependencies [add70b8]
+- Updated dependencies [e754d4f]
+- Updated dependencies [664e9df]
+- Updated dependencies [8d97d8a]
+- Updated dependencies [830d66b]
+- Updated dependencies [516c8f6]
+- Updated dependencies [00f631a]
+- Updated dependencies [ab30526]
+- Updated dependencies [df063ef]
+- Updated dependencies [958e6cb]
+- Updated dependencies [ee42687]
+- Updated dependencies [d4a745f]
+- Updated dependencies [3c0a830]
+- Updated dependencies [4f49cea]
+- Updated dependencies [6d5462d]
+- Updated dependencies [c2e7648]
+- Updated dependencies [12344fb]
+- Updated dependencies [1eaf6e3]
+- Updated dependencies [3b93aa2]
+  - @cotal-ai/core@0.86.0
+  - @cotal-ai/workspace@0.86.0
+  - @cotal-ai/lang@0.86.0
+
 ## 0.85.0
 
 ### Patch Changes

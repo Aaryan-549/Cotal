@@ -22,7 +22,7 @@ import {
 const smokeUid = mintLifecycleUid();
 import { createCalloutAuth, calloutPermissions, deriveOwnerToken, startAuthCallout, USER_TOKEN_VER } from "../src/index.js";
 import { pickFreePort } from "./_free-port.js";
-import { SMOKE_BROKER_TOKEN, teardownOnSignal } from "@cotal-ai/smoke-kit";
+import { SMOKE_BROKER_TOKEN, teardownOnSignal, emitSentinel } from "@cotal-ai/smoke-kit";
 
 const PORT = await pickFreePort();
 const SERVERS = `nats://127.0.0.1:${PORT}`;
@@ -132,3 +132,5 @@ try {
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   releaseBroker(); // last: ownership is held until this teardown has actually finished
 }
+
+emitSentinel({ passed: pass, failed: fail });

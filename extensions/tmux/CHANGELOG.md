@@ -1,5 +1,19 @@
 # @cotal-ai/tmux
 
+## 0.88.0
+
+## 0.87.0
+
+### Patch Changes
+
+- 8fc9dca: A tmux seat that outlives its manager is now adopted by the next manager instead of closed. The manager records each adoptable seat, and on startup the successor checks the recorded tmux server, window and pane, then manages the seat again under its existing credential so a run's pending turn continues on it. A seat whose pane has exited is retired as before.
+
+## 0.86.0
+
+### Patch Changes
+
+- a4dcc61: The tmux terminal layout now refuses a multi-pane tab with no `split` before it writes a launch script or opens a window. Before this, `open()` started the first pane in a new window and then threw, so the caller got an error with no ref while the window and its command kept running, and every retry left another one.
+
 ## 0.85.0
 
 ### Patch Changes

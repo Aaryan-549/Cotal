@@ -96,7 +96,7 @@ export async function profileFixtures(space: string): Promise<ProfileFixture[]> 
     "environment-manager-executor": () => environment("environment-manager-executor", `manager_exec_${instance}`),
     "environment-manager-goal-writer": () => environment("environment-manager-goal-writer", `manager_goal_${instance}`),
   };
-  const nonProfiles = ["membership-observer", "connection-evictor"];
+  const nonProfiles = ["membership-observer", "account-census", "connection-evictor"];
   assert.deepEqual(Object.keys(producers).sort(), Object.keys(CREDENTIAL_LIFETIMES).filter((kind) => !nonProfiles.includes(kind)).sort(), "every Profile must have a producer");
   for (const produce of Object.values(producers)) produce();
   const owner = deriveOwnerToken("census-prototype-secret".repeat(2), "view-owner");
@@ -120,10 +120,10 @@ export async function profileFixtures(space: string): Promise<ProfileFixture[]> 
       },
     );
     if (view === "manager-service") {
-      assert.throws(() => produce(token, principal.connId), /typed material exchange/);
+      assert.throws(() => produce(token, principal.connId, `N${"A".repeat(55)}_1`), /typed material exchange/);
       continue; // Explicit refused view, represented separately from Profile in the report.
     }
-    rows.push({ profile: view, variant: `callout-view:${view}`, permissions: await produce(token, principal.connId), producer: "calloutPermissions" });
+    rows.push({ profile: view, variant: `callout-view:${view}`, permissions: await produce(token, principal.connId, `N${"A".repeat(55)}_1`), producer: "calloutPermissions" });
   }
   assert.deepEqual(rows.filter((row) => row.producer === "calloutPermissions").map((row) => row.variant).sort(),
     USER_TOKEN_VIEWS.filter((view) => view !== "manager-service").map((view) => `callout-view:${view}`).sort(),

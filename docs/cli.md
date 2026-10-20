@@ -294,13 +294,24 @@ canary and waits for the bucket to expire it before reporting success. If the br
 stream update but the backing store does not persist or enforce it, `up` exits nonzero with a TTL
 persistence error instead of trusting the value returned by stream info. A refresh that restores a
 missing manager waits for that process to come up, then says so with its pid (`✓ restored in the
-background: manager (pid N)`). A manager that `up` starts and that exits at boot instead, for example
-while a crashed predecessor's lease has not expired, is reported as `! control plane degraded:` with
-the path of its log, and `up` then exits nonzero, whether it was a refresh, a first `--detach` boot
-or `up -f`. The same happens when another
+background: manager (pid N)`). A manager that `up` starts and that exits at boot instead is reported
+as `! control plane degraded:` with the path of its log, and `up` then exits nonzero, whether it was a
+refresh, a first `--detach` boot or `up -f`. The same happens when another
 `cotal supervise` takes over the manager pidfile before the started process comes up. A refresh that
 finds everything already running prints only the `✓ mesh "<space>" already running` line. A first
 boot starts its manager without the restore line.
+
+A manager or delivery daemon that is killed, or a daemon that exits because its broker went away,
+cannot release its lease. The row stays until the bucket TTL removes it: 10s for the manager and
+30s for delivery. A repair `up` inside that window waits out the row when it can show the holder is
+gone, then starts the replacement, so one run restores the control plane. For the manager, the row
+must name this workspace root and a pid that is not running on this host; the new manager logs
+`which is not running on this host; waiting` and the seconds left. For delivery, no daemon may be
+recorded running in this folder and the row must be held by the credential this folder gave its
+previous daemon; `up` prints `shard 0 is still leased to this folder's previous delivery daemon`.
+The wait never writes the lease. A row that is written again while `up` waits has a live holder, so
+the start is refused and `up` exits nonzero. A row held by any other process is refused at once,
+as before.
 
 
 `--user-auth --idp <url>` starts the space's auth service alongside the broker: the NATS
@@ -991,8 +1002,8 @@ same name wins and remains untouched; that discovered name is reported as a coll
 removes only the discovered entries owned by that account.
 
 `cotal meshes` and `cotal status` print `events: required` for a registration carrying
-`policy: { events: "required" }`. On that space, foreground spawn, detached spawn, manager starts,
-and interactive `join` cannot opt out or join without an event plane. `--no-events` is refused with
+`policy: { events: "required" }`. On that space, foreground spawn, detached spawn and manager
+starts that host a native harness cannot opt out or launch without an event plane. `--no-events` is refused with
 the space named. A connector without an event plane is refused with both the space and connector
 named. A session whose own grant omits `events.<owner>.<actor>` is refused before joining and the
 message names a full-row `actor grant` repair. A running seat whose event plane stops keeps running
@@ -1001,6 +1012,11 @@ itself and reports every failure with the delay before the next attempt. A seat 
 from a preserved cut meets the same rules as a fresh
 spawn: a seat retained with `--no-events`, or on a connector without an event plane, is refused, and
 a resumed seat carries the requirement in its launch material.
+
+`join`, one-shot sends and passive protocol views host no native harness turns. They publish no
+AG-UI runs, regardless of who drives their input. Required events do not turn terminal messages
+into agent runs or copy channel and DM text into an event stream. This launch policy is not an
+additional broker authorization boundary. The broker still enforces each endpoint's grants.
 
 `use <space>` sets that default; the selection applies from every directory,
 including inside another mesh's project. `status` is a read-only report: machine prerequisites
@@ -1668,7 +1684,17 @@ terminalizes only its own durable static slots, verify-evicts the predecessor's 
 records that result in the lifecycle's caller-readable audit detail, reaps the predecessor's seat
 process through the runtime's custody reference recorded on the slot (the pty runtime verifies the
 process start identity in its seat record, so a reused pid is never signalled), and only then
-retires the lifecycle and frees the alias. A runtime that custodies its seats reserves that
+retires the lifecycle and frees the alias. A seat whose spawn carried `supervise` with restarts left
+is restarted instead of retired: the successor reaps any seat the slot still names, relaunches it
+under the same name, lifecycle uid, credential, persona and cwd, and counts the restart against the
+policy. A seat on a runtime that can adopt a live seat (tmux) and still running when the successor
+starts is adopted in place: the successor checks that the recorded tmux server, window and pane are
+the ones the slot names and that the pane's process still runs, then manages that seat again under
+its existing credential, without a restart. Both paths read the record the manager writes to
+`.cotal/seat-records/<space>/<name>.json` once a supervised or adoptable seat is ready, rewrites at
+every restart and credential renewal, and removes when the seat is freed. A spent budget, a missing
+record, an expired credential, a persona file or credential that no longer matches the record, or
+an adoptable seat whose pane has exited retires the lifecycle as above. A runtime that custodies its seats reserves that
 reference before it launches one, and the manager records it on the slot's first durable row, so a
 manager that dies part-way through a spawn also leaves a seat its successor can address. A
 same-lifecycle restart or a resume records the new seat's reference on the slot the same way, and
@@ -2066,7 +2092,15 @@ from the operating system, never from `COTAL_NAME`. The wire principal comes fro
 operator credential or user bearer, not from `COTAL_NAME`, `COTAL_ID`, `COTAL_OWNER`, or
 `COTAL_ACTOR`. On an open mesh the transient endpoint self-mints its principal.
 
-The transient endpoint never joins the roster and binds no inbox. A recipient can still answer a
+The transient endpoint never joins the roster and binds no inbox. With a static or open-mesh
+credential it reads the roster and the channel registry once when it connects and binds no watch
+consumer, so it leaves nothing on the broker when it exits. On a user-auth mesh it runs on your user
+bearer, which has no batched read of those buckets, so it watches them instead, and each watch's
+consumer stays on the broker for five minutes after the send exits. A sustained send rate there can
+reach the broker's limit of 1000 consumers per stream, and the broker refuses further sends until
+the old consumers expire.
+
+A recipient can still answer a
 `send dm` or `send ask` with `cotal_dm`, by the sender's name or by the id on the message it
 holds: the reply is stored under the sender's id in the space's DM history, which an operator's DM
 view such as the dashboard's Direct messages lens shows. The `cotal send` that asked has already
@@ -2095,6 +2129,10 @@ own login as is; `set` and `default` edit the registry over a short-lived
 channel-writer view, which needs ledger scope `admin` ([Identity & auth](identity-and-auth.md)).
 On a remote user-auth mesh that view is served by the public exchange; space-history `purger`
 and the read-only admin view are not.
+
+With a static or open-mesh credential, `list` reads the registry with one Direct Get and leaves no
+consumer on the broker. On a user-auth mesh your login has no Direct Get row on the registry, so
+`list` scans it with a consumer that stays on the broker for five minutes after the command exits.
 
 
 ## history
@@ -2431,6 +2469,17 @@ cotal join --link <url> | --token <t>
 An interactive presence: join a space under your own name and role, without launching an agent
 harness. A `--link` or `--token` supplies the where and the auth in one value. See
 [Spaces](spaces.md) and [Identity and auth](identity-and-auth.md).
+
+On a registered user-auth space, sign in with `cotal login` first. `join` uses your existing `cli`
+actor bearer and renews it through the same login and exchange while the session runs. Its channel
+and DM resources must already be provisioned by the space operator. It never mints static
+credentials or widens your grants. A changed principal, lifecycle or connection trust refuses
+renewal and requires leaving and joining again. A revoked login is reported by renewal, and the
+current connection can last only until its already-issued bearer expires.
+
+For `nats://` and `tls://` addresses, if TLS is required but the broker does not offer it, `join`
+refuses with a request for the operator's TLS-enabled broker address. It never retries over
+plaintext. A `ws://` address uses plaintext WebSocket. Use `wss://` for TLS.
 
 ## Manifest deploys
 

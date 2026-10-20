@@ -29,7 +29,7 @@
     },
     {
       "name": "core mints a nonce instead of honoring the pinned envelope id",
-      "file": "packages/core/src/endpoint-verbs.ts",
+      "file": "packages/core/src/endpoint-call.ts",
       "find": "  const requestId = op.id !== undefined ? assertIdToken(op.id, \"pinned envelope id\") : nonce();",
       "replace": "  const requestId = nonce();",
       "command": "pnpm --filter @cotal-ai/core build && pnpm smoke:runtime-mesh-spawn",
