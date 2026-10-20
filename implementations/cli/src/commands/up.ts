@@ -11,6 +11,7 @@ import {
   statSync,
   readSync,
   closeSync,
+  fchmodSync,
   lstatSync,
   realpathSync,
   readdirSync,
@@ -2617,6 +2618,9 @@ export async function startMeshDetached(
     throw new Error("rotation bounds require --log-file");
   const hasNativeLog = opts.logFile !== undefined || opts.logfileSizeLimit !== undefined || opts.logfileMaxNum !== undefined;
   const logPath = opts.logFile ? resolve(opts.logFile) : cotalPath("nats.log");
+  const startupPath = hasNativeLog ? cotalPath("nats-startup.log") : undefined;
+  if (startupPath && logPath === startupPath)
+    throw new Error("--log-file must differ from the detached startup diagnostics path");
   if (hasNativeLog) mkdirSync(dirname(logPath), { recursive: true });
   const logOpts = hasNativeLog
     ? { logFile: logPath, logfileSizeLimit: opts.logfileSizeLimit, logfileMaxNum: opts.logfileMaxNum }
@@ -2639,13 +2643,15 @@ export async function startMeshDetached(
   const startOffset = existsSync(logPath) ? statSync(logPath).size : 0;
   let child: ChildProcess;
   let listenerStartedAt: string;
-  const startupPath = hasNativeLog ? cotalPath("nats-startup.log") : undefined;
   if (startupPath) {
     // Native logging owns its rotating inode. Pre-logger config/open failures still use stderr,
     // so retain that separately without a pipe that depends on this parent staying alive.
     const fd = openSync(startupPath, "w", 0o600);
     listenerStartedAt = new Date().toISOString();
-    try { child = spawn(bin, args, { detached: true, stdio: ["ignore", fd, fd] }); }
+    try {
+      fchmodSync(fd, 0o600);
+      child = spawn(bin, args, { detached: true, stdio: ["ignore", fd, fd] });
+    }
     finally { closeSync(fd); }
   } else {
     const fd = openSync(logPath, "a");

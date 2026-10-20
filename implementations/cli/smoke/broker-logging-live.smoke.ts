@@ -1,7 +1,7 @@
 /** Native broker logging, failed detached startup and preserved-launch regression checks. */
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { emitSentinel, freePort, recordSmokeSandbox, assertSmokeSandboxDown } from "@cotal-ai/smoke-kit";
 import { makeScratch, assertScratchHeld } from "../../../bin/smoke/_scratch.js";
@@ -111,6 +111,17 @@ try {
       assert.match(diagnostic, kind === "config" ? /[Ii]nvalid escape/ : /[Ii]s a directory/);
     });
   }
+  await cell("R433-existing-startup-log-is-private", async () => {
+    const startup = join(root, ".cotal/nats-startup.log");
+    writeFileSync(startup, "prior log"); chmodSync(startup, 0o644);
+    try { await startMeshDetached({ transport, server: "nats://127.0.0.1:1", space: "logging-failure", open: true, noManager: true,
+      logFile, storeDir: join(root, "bad\bstore") }); } catch {}
+    assert.equal(statSync(startup).mode & 0o777, 0o600);
+  });
+  await cell("R433-startup-path-cannot-be-native-log", async () => {
+    await assert.rejects(() => startMeshDetached({ transport, server: "nats://127.0.0.1:1", space: "logging-failure", open: true, noManager: true,
+      logFile: join(root, ".cotal/nats-startup.log"), storeDir: join(root, "bad\bstore") }), /log-file.*startup/);
+  });
   // Real registry -> preservation document -> ordinary resume. No supplied log flags on resume.
   const port = await freePort();
   const server = `nats://127.0.0.1:${port}`;

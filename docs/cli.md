@@ -18,7 +18,9 @@ Manifest keys are `broker.logFile`, `broker.logfileSizeLimit` and `broker.logfil
 Relative manifest paths resolve beside the manifest. CLI paths resolve from the working directory.
 
 Detached launches keep pre-logger failures in `.cotal/nats-startup.log`, separate from the
-rotating file. A failed launch names that file and includes its first bounded diagnostic bytes.
+rotating file. Its permissions are enforced as 0600 even when it already exists. The native
+log path must differ from this startup diagnostics path. A failed launch names the file and
+includes its first bounded diagnostic bytes.
 Logging choices are recorded and retained by preserved resumes. Different explicit choices
 are refused during resume. With no log options, existing logging behavior is unchanged.
 
