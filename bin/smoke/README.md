@@ -79,6 +79,12 @@ not the full gate or a replacement name for a smaller testing tier.
 
 ## Workspace commands
 
+`pnpm smoke:required-arg-seam --census` prints the actual classified call sites. Review each
+added or removed site before updating `required-arg-sites.json` and the total/smoke pins.
+The per-file counts detect a hidden site replaced by a call in another file, but not a
+replacement within one file. A built Hermes sidecar adds one separately pinned non-smoke
+call. Fresh and built checkouts retain the same source census.
+
 Use the repository's pinned pnpm version. Recursive package tasks start when their
 own declared prerequisites finish, within pnpm's worker limit. They need not wait
 for unrelated packages in the same dependency group. Nested test workers have
