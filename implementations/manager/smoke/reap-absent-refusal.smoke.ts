@@ -18,6 +18,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { requireRuntimeReap } from "../src/runtime/index.js";
 
 let pass = 0, fail = 0;
@@ -82,32 +83,97 @@ check(
 // (d) the census the issue asked for, stated before measuring: after the fix NO site renders an
 // absent outcome, because absent cannot reach one. A sample would not have caught the second site.
 const here = dirname(fileURLToPath(import.meta.url));
-const managerSrc = readFileSync(resolve(here, "..", "src", "manager.ts"), "utf8");
+const managerFile = resolve(here, "..", "src", "manager.ts");
+const managerSrc = readFileSync(managerFile, "utf8");
 const renderings = managerSrc.split('outcome === "absent"').length - 1;
 check(
   "#1554: NO site in manager.ts renders an absent outcome as prose (expected 0)",
   renderings === 0,
   { renderings },
 );
-// The callsites by the method each sits in, not by count. `absent` cannot reach any of them, but a
-// site that catches the refusal decides what happens to the seat next, so a new site fails here until
-// it is read and named. What each does with a refusal:
+
+/** Every reap in a source file, read from its syntax tree. `guarded` is each `requireRuntimeReap`
+ *  call, named by the callables that contain it (`Class.method`, with `<anonymous>` for an unnamed
+ *  callback). `bypass` is every other use of a runtime's `reap`: a direct call, a read, or a
+ *  destructured binding, which would see `absent` without the refusal. `probes` are the `typeof x.reap`
+ *  feature checks, which call nothing. */
+function censusReaps(fileName: string, text: string): { guarded: string[]; bypass: string[]; probes: string[] } {
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const nameOf = (node: ts.Node): string => {
+    if (ts.isClassLike(node)) return node.name?.text ?? "<class>";
+    if (ts.isConstructorDeclaration(node)) return "constructor";
+    if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && !node.name) {
+      const holder = node.parent;
+      if ((ts.isPropertyDeclaration(holder) || ts.isVariableDeclaration(holder) || ts.isPropertyAssignment(holder)) && holder.initializer === node)
+        return holder.name.getText(source);
+      return "<anonymous>";
+    }
+    return (node as ts.NamedDeclaration).name?.getText(source) ?? "<anonymous>";
+  };
+  const where = (node: ts.Node): string => {
+    const names: string[] = [];
+    for (let p = node.parent; p; p = p.parent) if (ts.isClassLike(p) || ts.isFunctionLike(p)) names.unshift(nameOf(p));
+    return names.join(".") || "<top level>";
+  };
+  const line = (node: ts.Node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const isReapName = (node: ts.Node) =>
+    (ts.isPropertyAccessExpression(node) && node.name.text === "reap")
+    || (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "reap");
+  const out = { guarded: [] as string[], bypass: [] as string[], probes: [] as string[] };
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "requireRuntimeReap") out.guarded.push(where(node));
+    if (isReapName(node)) {
+      let outer: ts.Node = node.parent;
+      while (ts.isParenthesizedExpression(outer)) outer = outer.parent;
+      (ts.isTypeOfExpression(outer) ? out.probes : out.bypass).push(`${where(node)} (line ${line(node)})`);
+    }
+    if (ts.isBindingElement(node) && (node.propertyName ?? node.name).getText(source) === "reap") out.bypass.push(`${where(node)} (line ${line(node)})`);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return out;
+}
+
+// The census has to tell a reviewed site from a moved or new one, so it first reads four small
+// sources that each break the reviewed set in a way a nearest-header scan misses.
+const fixture = (body: string) => `class Manager {\n  private async reapOrphanSeat() { await requireRuntimeReap(rt, ref); }\n${body}\n}\n`;
+const instrument: [string, string, (c: ReturnType<typeof censusReaps>) => boolean][] = [
+  ["a reap moved into a class arrow property is named by that property", fixture("  private later = async () => { await requireRuntimeReap(rt, ref); };"),
+    (c) => c.guarded.includes("Manager.later")],
+  ["a reap in a generic method is named by that method", fixture("  private async later<T>(x: T) { await requireRuntimeReap(rt, ref); }"),
+    (c) => c.guarded.includes("Manager.later")],
+  ["a reap inside a callback is named as that callback, not as its method", fixture("  private async later() { [1].map(async () => requireRuntimeReap(rt, ref)); }"),
+    (c) => c.guarded.includes("Manager.later.<anonymous>")],
+  ["a direct runtime.reap call that skips the guard is a bypass", fixture("  private async later() { await this.requiredRuntime.reap(ref); }"),
+    (c) => c.bypass.length === 1 && c.bypass[0]!.startsWith("Manager.later")],
+];
+for (const [name, text, holds] of instrument) {
+  const c = censusReaps("fixture.ts", text);
+  check(`CONTROL (census instrument): ${name}`, holds(c), c);
+}
+
+// The real file. What each reviewed site does with a refusal:
 //   reapOrphanedResumeSeat: returns it, and the resume does not relaunch over that seat.
 //   reapOrphanSeat: lets it propagate into driveStaticRetirement, which holds the name.
 //   restartSupervisedSeat (#4094): returns it, and the caller retires the lifecycle through the
 //     terminal, which reaps again in reapOrphanSeat and so holds the name.
 //   spawnCustodied: carries it into the throw, saying the seat was not proved gone.
-const REVIEWED_SITES = ["reapOrphanSeat", "reapOrphanedResumeSeat", "restartSupervisedSeat", "spawnCustodied"];
-const member = /\n  (?:(?:private|public|protected|static|async)\s+)*([A-Za-z_$][\w$]*)\s*\(/g;
-const sites: string[] = [];
-for (let at = managerSrc.indexOf("requireRuntimeReap("); at >= 0; at = managerSrc.indexOf("requireRuntimeReap(", at + 1)) {
-  const names = [...managerSrc.slice(0, at).matchAll(member)].map((m) => m[1]).filter((n) => !["if", "for", "while", "switch", "catch", "return"].includes(n!));
-  sites.push(names.at(-1) ?? "?");
-}
+const REVIEWED_SITES = ["Manager.reapOrphanSeat", "Manager.reapOrphanedResumeSeat", "Manager.restartSupervisedSeat", "Manager.spawnCustodied"];
+const census = censusReaps(managerFile, managerSrc);
 check(
-  `CONTROL: the census sees exactly the reviewed reap callsites, by enclosing method (${REVIEWED_SITES.join(", ")})`,
-  JSON.stringify([...sites].sort()) === JSON.stringify(REVIEWED_SITES),
-  { sites },
+  `CONTROL: every requireRuntimeReap call in manager.ts sits in a reviewed callable (${REVIEWED_SITES.join(", ")})`,
+  JSON.stringify([...census.guarded].sort()) === JSON.stringify(REVIEWED_SITES),
+  { guarded: census.guarded },
+);
+check(
+  "#1554: no reap in manager.ts goes around requireRuntimeReap",
+  census.bypass.length === 0,
+  { bypass: census.bypass },
+);
+check(
+  "CONTROL: the bypass scan sees the one typeof feature probe of reap, in Manager.orphanedResumeSeat",
+  census.probes.length === 1 && census.probes[0]!.startsWith("Manager.orphanedResumeSeat "),
+  { probes: census.probes },
 );
 
 console.log(`\nREAP-ABSENT-REFUSAL ${fail === 0 ? "OK ✅" : "FAILED ❌"}  (${pass} passed, ${fail} failed)`);
