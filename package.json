@@ -612,6 +612,7 @@
     "smoke:multi-space": "tsx implementations/cli/smoke/multi-space.smoke.ts",
     "smoke:up-multi-space-render:live": "tsx implementations/cli/smoke/up-multi-space-render-live.smoke.ts",
     "smoke:up-refresh-identity:live": "tsx implementations/cli/smoke/up-refresh-identity-live.smoke.ts",
+    "smoke:broker-logging:live": "tsx implementations/cli/smoke/broker-logging-live.smoke.ts",
     "smoke:up-resume-render-lock:live": "tsx implementations/cli/smoke/up-resume-render-lock-live.smoke.ts",
     "smoke:up-adopt-resume-lock:live": "tsx implementations/cli/smoke/up-adopt-resume-lock-live.smoke.ts",
     "smoke:up-restore-reentry:live": "tsx implementations/cli/smoke/up-restore-reentry-live.smoke.ts",
@@ -812,8 +813,7 @@
     "smoke:environment-manager-admission-index": "tsx implementations/auth/smoke/environment-manager-admission-index.smoke.ts",
     "smoke:environment-manager-bootstrap-mint": "tsx implementations/auth/smoke/environment-manager-bootstrap-mint.smoke.ts",
     "smoke:manager-run-owned-agents": "tsx implementations/manager/smoke/run-owned-agents.smoke.ts",
-    "smoke:claude-mcp-default": "tsx extensions/connector-claude-code/smoke/mcp-default.smoke.ts",
-    "smoke:broker-logging:live": "tsx implementations/cli/smoke/broker-logging-live.smoke.ts"
+    "smoke:claude-mcp-default": "tsx extensions/connector-claude-code/smoke/mcp-default.smoke.ts"
   },
   "dependencies": {
     "@cotal-ai/auth": "workspace:*",
