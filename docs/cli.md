@@ -2463,6 +2463,10 @@ credentials or widens your grants. A changed principal, lifecycle or connection 
 renewal and requires leaving and joining again. A revoked login is reported by renewal, and the
 current connection can last only until its already-issued bearer expires.
 
+For `nats://` and `tls://` addresses, if TLS is required but the broker does not offer it, `join`
+refuses with a request for the operator's TLS-enabled broker address. It never retries over
+plaintext. A `ws://` address uses plaintext WebSocket. Use `wss://` for TLS.
+
 ## Manifest deploys
 
 A `cotal.yaml` manifest declares a whole mesh (channels, personas, roles, and ACLs) in one file.
