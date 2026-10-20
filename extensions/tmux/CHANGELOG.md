@@ -1,5 +1,11 @@
 # @cotal-ai/tmux
 
+## 0.87.0
+
+### Patch Changes
+
+- 8fc9dca: A tmux seat that outlives its manager is now adopted by the next manager instead of closed. The manager records each adoptable seat, and on startup the successor checks the recorded tmux server, window and pane, then manages the seat again under its existing credential so a run's pending turn continues on it. A seat whose pane has exited is retired as before.
+
 ## 0.86.0
 
 ### Patch Changes

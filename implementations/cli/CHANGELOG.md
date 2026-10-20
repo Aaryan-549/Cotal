@@ -1,5 +1,32 @@
 # @cotal-ai/cli
 
+## 0.87.0
+
+### Patch Changes
+
+- d83f478: A `cotal` command started with a few hundred KB of argv, such as `cotal send dm <name> "<480 KB text>"`, no longer exits 13 before it runs. The CLI loaded Ink and its wasm layout engine at startup for every command, and on macOS that engine's init never finished with an argv that large. Ink and the console UI now load only when `cotal console` runs.
+- 6b1e309: `cotal join` under a provisioned credential now prints each channel post once. Such a join holds a durable delivery backstop for its channel, so every post reached it twice under the same message id, once on the live channel subscription and once from the backstop, and the join printed both. It now deduplicates by message id as the protocol requires of a receiver, acks the second copy, and never treats an empty id as a key.
+- 70aa27b: A repair `cotal up` after a crash now restores the manager and the delivery daemon in one run. A
+  manager or delivery daemon that is killed, or a daemon that exits because its broker went away,
+  cannot release its lease, and a replacement started inside the lease TTL used to lose the create and
+  make `up` exit 1. The new manager now waits out a lease row that names its workspace root and a pid
+  that is not running on the host, and `up` waits out a delivery lease held by the credential the
+  folder gave its previous daemon while no daemon is recorded running. The wait never writes the
+  lease: a row that is written again during it has a live holder and is refused, and a row held by
+  anyone else is refused at once as before.
+- e6bb48f: `cotal send`, `cotal endpoints`, `cotal personas list --running`, `cotal channels list` and the name check in `cotal spawn` no longer leave consumers on the broker. Each one opened a transient endpoint that watched the presence bucket and the channel registry, and the operator credential cannot delete those consumers, so every command left one consumer on each bucket for five minutes. Five shells sending in a loop reached the broker's limit of 1000 consumers per stream, and further sends failed with `maximum consumers limit reached`. With a static or open-mesh credential the transient endpoint now reads both buckets once with a batched Direct Get and binds no consumer. `cotal channels list` reads the registry the same way through the new `directGet` option of `readChannelRegistry`. `@cotal-ai/core` adds the `readOnce` endpoint option and `lastKvEntries`, and the `operator` profile gains the Direct Get row on both buckets. On a user-auth mesh these commands still run on the user's bearer and keep their consumers.
+- Updated dependencies [e84b6c6]
+- Updated dependencies [c06cf5b]
+- Updated dependencies [af82e8d]
+- Updated dependencies [0f92fa4]
+- Updated dependencies [5d686ff]
+- Updated dependencies [970bf2d]
+- Updated dependencies [9755079]
+- Updated dependencies [70aa27b]
+- Updated dependencies [e6bb48f]
+  - @cotal-ai/core@0.87.0
+  - @cotal-ai/workspace@0.87.0
+
 ## 0.86.0
 
 ### Minor Changes

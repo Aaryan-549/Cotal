@@ -1,5 +1,31 @@
 # @cotal-ai/auth
 
+## 0.87.0
+
+### Minor Changes
+
+- c06cf5b: History reads on observer and admin credentials no longer leave consumers behind. `channelHistory`, `multiChannelHistory` and `dmHistory` used to read through nats.js ordered consumers that these profiles could not delete, so each read left two or three consumers for five minutes. A dashboard polling history filled the stream's consumer limit, and every later read failed with "maximum consumers limit reached". The reads now use the connection's own reader names, `hist_<readerId>_<n>` with `n` in `0..7`, and delete each reader when its step ends. A static credential's `readerId` is its nkey. Under the auth callout it is the server's id and the client id the server assigned the connection, so a client cannot claim another connection's readers by choosing its inbox nonce. A connection runs at most eight history reads at once per stream, and a read past that waits for a free name. A consumer found under one of the names is never deleted, and a create that returns an existing consumer is never read through; the read moves to a free name.
+
+  The observer profile gains `$JS.API.CONSUMER.DELETE.<CHAT>.hist_<readerId>_<n>` for those eight names, and admin also gains them on `<DM>`. Each row names one consumer of this connection and no other. Breaking: a static observer or admin credential minted before this release has no such row, and a current client's history read on it fails and says to remint it. Remint those files, and upgrade the auth service before or with the hosts that read history on a user-auth mesh. The auth callout's `permissionsFor` hook now receives the connection's reader id as a third argument, and the function `calloutPermissions` returns requires it.
+
+- e84b6c6: The auth service serves `POST /manager-instances` on both faces: the signed-in human's own Manager instances, read-only. It verifies the same IdP proof the human exchange verifies, derives the owner the same way, and answers `{ v: 1, owner, complete: true, instances }`, each instance with its placement and the verdict selection reads (`candidate`, `not open`, `not registered`, `not this owner's`, `unknown`). Selection is now built on the same list, and the plane `openAuthAuthorityPlane` returns gains `listManagerInstances`. A listed candidate is registration evidence, not proof that the instance answers. Browser-origin requests are refused as on every exchange route, and a failed gate read answers 503, never an empty list.
+- 8d513aa: Add a consent-only verifier for pinned signed password authentication within five minutes and a host-only proof decision door. Retain validated authentication provenance without changing ordinary bearer exchange. Private tool-result consent, issuance and serving remain unavailable.
+
+### Patch Changes
+
+- Updated dependencies [e84b6c6]
+- Updated dependencies [c06cf5b]
+- Updated dependencies [af82e8d]
+- Updated dependencies [0f92fa4]
+- Updated dependencies [5d686ff]
+- Updated dependencies [970bf2d]
+- Updated dependencies [9755079]
+- Updated dependencies [70aa27b]
+- Updated dependencies [e6bb48f]
+  - @cotal-ai/core@0.87.0
+  - @cotal-ai/workspace@0.87.0
+  - @cotal-ai/lang@0.87.0
+
 ## 0.86.0
 
 ### Minor Changes
