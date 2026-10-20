@@ -84,16 +84,30 @@ check(
 const here = dirname(fileURLToPath(import.meta.url));
 const managerSrc = readFileSync(resolve(here, "..", "src", "manager.ts"), "utf8");
 const renderings = managerSrc.split('outcome === "absent"').length - 1;
-const callsites = managerSrc.split("requireRuntimeReap(").length - 1;
 check(
   "#1554: NO site in manager.ts renders an absent outcome as prose (expected 0)",
   renderings === 0,
   { renderings },
 );
+// The callsites by the method each sits in, not by count. `absent` cannot reach any of them, but a
+// site that catches the refusal decides what happens to the seat next, so a new site fails here until
+// it is read and named. What each does with a refusal:
+//   reapOrphanedResumeSeat: returns it, and the resume does not relaunch over that seat.
+//   reapOrphanSeat: lets it propagate into driveStaticRetirement, which holds the name.
+//   restartSupervisedSeat (#4094): returns it, and the caller retires the lifecycle through the
+//     terminal, which reaps again in reapOrphanSeat and so holds the name.
+//   spawnCustodied: carries it into the throw, saying the seat was not proved gone.
+const REVIEWED_SITES = ["reapOrphanSeat", "reapOrphanedResumeSeat", "restartSupervisedSeat", "spawnCustodied"];
+const member = /\n  (?:(?:private|public|protected|static|async)\s+)*([A-Za-z_$][\w$]*)\s*\(/g;
+const sites: string[] = [];
+for (let at = managerSrc.indexOf("requireRuntimeReap("); at >= 0; at = managerSrc.indexOf("requireRuntimeReap(", at + 1)) {
+  const names = [...managerSrc.slice(0, at).matchAll(member)].map((m) => m[1]).filter((n) => !["if", "for", "while", "switch", "catch", "return"].includes(n!));
+  sites.push(names.at(-1) ?? "?");
+}
 check(
-  "CONTROL: the census can still see the reap callsites it is scoped to (expected 3)",
-  callsites === 3,
-  { callsites },
+  `CONTROL: the census sees exactly the reviewed reap callsites, by enclosing method (${REVIEWED_SITES.join(", ")})`,
+  JSON.stringify([...sites].sort()) === JSON.stringify(REVIEWED_SITES),
+  { sites },
 );
 
 console.log(`\nREAP-ABSENT-REFUSAL ${fail === 0 ? "OK ✅" : "FAILED ❌"}  (${pass} passed, ${fail} failed)`);
