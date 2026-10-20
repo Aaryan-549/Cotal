@@ -215,6 +215,7 @@
     "smoke:manager-caller-transport": "tsx implementations/runtime/smoke/manager-caller-transport.smoke.ts",
     "smoke:manager-launch-reads": "tsx implementations/manager/smoke/launch-reads.smoke.ts",
     "smoke:manager-status-metadata": "tsx implementations/manager/smoke/status-metadata.smoke.ts",
+    "smoke:manager-delegated-config": "tsx implementations/manager/smoke/delegated-config.smoke.ts",
     "smoke:goal-submit-order": "tsx packages/core/smoke/goal-submit-order.smoke.ts",
     "smoke:goal-follow-cancellation": "tsx packages/core/smoke/goal-follow-cancellation.smoke.ts",
     "smoke:user-bearer-goal-lifetime": "tsx implementations/manager/smoke/user-bearer-goal-lifetime.smoke.ts",
@@ -325,6 +326,8 @@
     "smoke:manifest-launch": "tsx implementations/manager/smoke/manifest-launch.smoke.ts",
     "smoke:own-agent-control": "tsx implementations/manager/smoke/own-agent-control.smoke.ts",
     "smoke:views": "tsx implementations/auth/smoke/views.smoke.ts",
+    "smoke:tool-result-consent": "tsx implementations/auth/smoke/tool-result-consent.smoke.ts",
+    "smoke:tool-result-consent-acl": "tsx implementations/auth/smoke/tool-result-consent-acl.smoke.ts",
     "smoke:tool-result-human-proof": "tsx implementations/auth/smoke/tool-result-human-proof.smoke.ts",
     "smoke:manager-service-authority": "tsx implementations/auth/smoke/manager-service-authority.smoke.ts",
     "probe:remote-manager-executor-authority": "tsx implementations/auth/smoke/remote-manager-executor-authority.probe.ts",
@@ -824,7 +827,8 @@
     "smoke:environment-manager-admission-index": "tsx implementations/auth/smoke/environment-manager-admission-index.smoke.ts",
     "smoke:environment-manager-bootstrap-mint": "tsx implementations/auth/smoke/environment-manager-bootstrap-mint.smoke.ts",
     "smoke:manager-run-owned-agents": "tsx implementations/manager/smoke/run-owned-agents.smoke.ts",
-    "smoke:claude-mcp-default": "tsx extensions/connector-claude-code/smoke/mcp-default.smoke.ts"
+    "smoke:claude-mcp-default": "tsx extensions/connector-claude-code/smoke/mcp-default.smoke.ts",
+    "smoke:presence-runtime": "tsx packages/core/smoke/presence-runtime.smoke.ts"
   },
   "dependencies": {
     "@cotal-ai/auth": "workspace:*",

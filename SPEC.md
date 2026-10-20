@@ -358,6 +358,7 @@ Presence is a per-space directory keyed by instance id. NATS binding: JetStream 
 | `activeAt` | number | MAY | epoch ms of the last work progress the harness reported, such as a token or a tool call. Missing means the connector reports none. `ts` is the heartbeat, so a live instance whose turn stopped advancing keeps a fresh `ts` and an old `activeAt`. A connector relays the harness's events and carries the value on its next heartbeat |
 | `attention` | `AttentionMode` | MAY | global attention mode: `open` \| `dnd` \| `focus`. Advisory observability; `open`/absent ⇒ receives everything. Reset: `open` published on `SessionStart`, removed on the offline sweep |
 | `lifecycleUid` | string | MUST in auth mode from v0.4 | the current managed-lifecycle UID (§13.1); distinguishes a live instance from a same-name successor. Advisory for display; authority checks use the trusted lifecycle mapping, not presence |
+| `runtime` | `PresenceRuntime` | MAY | the OS process holding this record's mesh connection, as that process observed itself: `{ id, startedAt, source }`. `id` is an opaque CSPRNG token minted once per (OS process, `lifecycleUid`) scope and MUST NOT be reused or span two lifecycle UIDs. A new process or lifecycle scope MUST get a new id. `startedAt` is the epoch ms that OS process started, read in-process (`performance.timeOrigin`), shared by all endpoints in the process. A lifecycle registered later carries the process's age, not its lifecycle age. It MUST NOT date a launch request, registration, heartbeat, activity, separate parent or model harness process. `source` is the closed set `endpoint-process`; an observer treats any other value as unsupported. Status, activity, heartbeats and in-process reconnects within the scope leave it unchanged. An offline record keeps it, so `now - startedAt` dates a running process only while the record is live. It carries no pid, host, path, command line or environment. Missing means not reported, never zero |
 | `channelModes` | `Record<string, ChannelMode>` | MAY | per-channel attention overrides (`ChannelMode` = `quiet` \| `muted`), keyed by concrete channel name. Advisory, **not** access control (the broker still authorises and delivers); a receive-side preference, reset on restart |
 | `ts` | number | MUST | epoch ms of last heartbeat |
 
@@ -767,6 +768,14 @@ The `resolve-cwd` launch read is limited by execution mode. A manager whose runt
 seats outside its host MUST refuse it with `failed-precondition` before any filesystem lookup.
 The refusal MUST be independent of the requested path's existence, type and symlink target,
 and MUST NOT return a host name or canonical path. Such a runtime cannot use a manager-host cwd.
+
+On such a runtime, a caller-supplied persona `config` override MUST be refused before resolving,
+checking or reading its host path. Every path shape MUST receive `failed-precondition` and the
+same message: `delegated execution cannot use a manager-host persona config path; select a named persona`.
+This applies to `resolve-agent` and `spawn`, including starts submitted through library or workflow
+hosts. A named persona remains subject to the manager's catalog visibility rules. A validated
+resolved manifest may use its own host-materialized persona resource; public requests MUST NOT
+be able to supply that internal resolved authority as a config override.
 
 DM and TASK confidentiality, and the CHAT read boundary, close the leak paths:
 

@@ -259,6 +259,8 @@ runtime create and status kinds. For those it reads the manager actor's ledger r
 `{ authorized: true, owner, instanceId, actor, target }`.
 The fourth, `POST /tool-result-human-proof/verify`, decides a pinned password proof for the
 host's authenticated session subject without issuing consent or credentials.
+The opt-in `POST /tool-result-consent/issue` door signs and records a same-owner consent
+under a host-custodied scoped anchor. It returns no result content, private key or capability.
 [embedding.md](embedding.md) documents these host doors' contracts.
 
 The public listener has a closed surface: `GET /health`, `GET /jwks`, `POST /exchange`,

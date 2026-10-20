@@ -283,6 +283,7 @@ const FIXTURE: Record<string, { publish: string[]; subscribe: string[] }> = {
     "$KV.cotal_auth_d32m.natkey.>",
     "$KV.cotal_records_d32m.lifecycle.>",
     "$KV.cotal_records_d32m.uid.>",
+    "$KV.cotal_auth_d32m.consent.*",
   ], subscribe: ["_INBOX_ibxconn0123456789.>"] },
   "environment-admission-index": { publish: [
     "$JS.API.INFO", "$JS.API.STREAM.CREATE.KV_cotal_environment_managers_d32m",

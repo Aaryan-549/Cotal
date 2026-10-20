@@ -1,5 +1,33 @@
 # cotal-ai
 
+## 0.87.0
+
+### Patch Changes
+
+- Updated dependencies [e84b6c6]
+- Updated dependencies [d83f478]
+- Updated dependencies [c06cf5b]
+- Updated dependencies [6b1e309]
+- Updated dependencies [af82e8d]
+- Updated dependencies [0f92fa4]
+- Updated dependencies [e84b6c6]
+- Updated dependencies [5d686ff]
+- Updated dependencies [970bf2d]
+- Updated dependencies [9755079]
+- Updated dependencies [70aa27b]
+- Updated dependencies [e6bb48f]
+- Updated dependencies [aae54dd]
+- Updated dependencies [8fc9dca]
+- Updated dependencies [8d513aa]
+  - @cotal-ai/core@0.87.0
+  - @cotal-ai/cli@0.87.0
+  - @cotal-ai/auth@0.87.0
+  - @cotal-ai/connector-core@0.87.0
+  - @cotal-ai/manager@0.87.0
+  - @cotal-ai/delivery@0.87.0
+  - @cotal-ai/runtime@0.87.0
+  - @cotal-ai/workspace@0.87.0
+
 ## 0.86.0
 
 ### Patch Changes

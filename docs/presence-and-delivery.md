@@ -48,7 +48,15 @@ because an observer that derives `offline` from a stale heartbeat does not know 
 The optional `activitySince` is when the current activity was set. A status change does not move it,
 so an activity left behind while hooks flip the status every turn still shows its age after the
 activity on the same surfaces, such as `(set 9h ago)`. A stamp that is not a finite number shows no
-age. A peer writes its own condition code and activity, so every surface above prints each on one
+age. The optional `runtime` describes the OS process holding the mesh connection. Its opaque `id`
+is minted once per process and lifecycle scope and is never reused across scopes. Its `startedAt`
+is the process's own `performance.timeOrigin`, shared by all endpoints in that process, and its
+closed `source` is `"endpoint-process"`. Status, activity, heartbeats and in-process reconnects keep
+that observation unchanged within the scope. A lifecycle registered later reports the process's
+age, not the lifecycle's age. It does not date a separately launched parent or model harness.
+An offline record retains the observation without claiming a running duration. Older publishers
+omit it, which means unknown. A runtime-only change notifies presence observers.
+A peer writes its own condition code and activity, so every surface above prints each on one
 line, shows a control character or line separator in it as a `\uXXXX` escape, and cuts it at 200
 characters.
 The optional `environment` is an opaque provider reference. Core publishes

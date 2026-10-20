@@ -346,6 +346,27 @@ the verified subject, which must match the session. The door verifies proof only
 sign consent, issue credentials, register a service or serve private content. A host must still
 refuse platform keys and check current membership and lifecycle at consent admission.
 
+A host may opt into consent issuance with `startAuthService({ ..., toolResultConsents: { keyId,
+resolveAnchor } })`. Provision its Ed25519 nkey seed under `toolResultConsentKey(space)` in the
+injected private store as `{ ver: 1, keyId, seed }`. The resolver reads that space's current
+`consents` anchor with scope `tool-results`. Missing, corrupt, revoked or mismatched signing
+material refuses. Neither the private store nor the resolver belongs in a worker or client.
+
+The loopback-only `POST /tool-result-consent/issue` requires the current host capability and no
+Origin header. Its closed input is `{ id, idpToken, subject, accountPublicKey, holder, target,
+ttlMs }`. The host resolves those coordinates from its current authenticated membership and
+account assignment. `holder` carries `{ actor, lifecycleUid }`; `target` carries `{ owner,
+actor, lifecycleUid }`. Auth verifies the signed password proof and derives the owner itself,
+requires a current same-owner interactive holder and managed target, and caps the window at
+24 hours. It returns only `{ consent }`, after a create-only `consent.<id>` auth-store write.
+Duplicate ids refuse. A failed or lost acknowledgement returns no consent and never retries.
+The host must not label an unknown outcome completed or resubmit it automatically.
+Only the auth mint writer holds consent-KV publish authority. The environment admission writer
+and remote manager issuer do not inherit that grant. Create-only enforcement remains in the recorder.
+
+This door is absent from the public face. Without the opt-in signer it answers unavailable.
+It installs no serving material, revocation store, caller view, capture or result reader.
+
 Public tool arguments and results remain withheld. Auth and host issuance, Manager material,
 connector capture and the browser caller must each be landed and qualified in the
 [design's owner order](design/private-tool-results.md#9-owner-order), then carried by a stock
@@ -844,6 +865,13 @@ issuer or callout record, loopback capability, provisioner or manager credential
 manager path crosses. A spawn choice that only the manager's host can honour is refused before
 enrollment: `--resume`, a manifest agent's `continuity: exact`, `--cwd`, and any shared MCP server,
 whether from `--share-tools` or the config default (`--share-tools none` passes).
+
+A delegated manager also refuses a caller-supplied persona `config` override in `resolve-agent`,
+`spawn` and direct `Manager.startAgent` calls. The shared persona resolver refuses before checking
+or reading that path, with `failed-precondition` on the wire and one fixed execution-mode message.
+Pass a named catalog persona instead. This does not change locally executing managers. A resolved
+manifest can still use its own validated, host-materialized persona resource. The wire schemas
+accept no internal `resolved` field that could bypass the config refusal.
 
 The runtime creates one provider resource under `managedRuntimeKey(target)`, writes the handoff into
 it as one 0600 file and the persona beside it, and runs the stock bootstrap there:

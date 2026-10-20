@@ -1,3 +1,5 @@
+import { registryStores } from "./lifecycle-registry.js";
+import { createToolResultConsentSigner, makeToolResultConsentRecorder, type ToolResultConsentRecorder, type ToolResultConsentSignerOptions } from "./tool-result-consent.js";
 /**
  * The AUTH SERVICE daemon — the one server-side process a user-auth space runs alongside its broker
  * (the delivery-daemon pattern: spawned detached by `cotal up`, pid-filed per space, torn down by
@@ -147,6 +149,9 @@ export const VERIFY_ENROLLMENT_PATH = "/manager-service-authority/verify-enrollm
 /** Host-only, capability-gated proof decision. It neither signs consent nor serves results. */
 export const TOOL_RESULT_HUMAN_PROOF_PATH = "/tool-result-human-proof/verify";
 
+/** Host-only signed consent issuance, never private result content. */
+export const TOOL_RESULT_CONSENT_PATH = "/tool-result-consent/issue";
+
 /** Failed-exchange rate limit: at most this many REFUSED exchanges per rolling minute; further
  *  attempts get 429 until the window drains. Successes are unthrottled (the CLI's normal path). */
 const FAILED_EXCHANGE_PER_MIN = 30;
@@ -215,6 +220,7 @@ export interface AuthAuthorityPlane {
   /** The callout's required native-key issuance recorder (SPEC 13.1 `natkey.`): create-only, then
    *  the same connect authority re-read before the minted JWT may leave. */
   recordIssuance: NativeIssuanceRecorder;
+  recordToolResultConsent: ToolResultConsentRecorder;
   mintConnectCredential: (args: { owner: string; actor: string; lifecycleUid: string }) => Promise<string>;
   /** `caller` picks the remedy an ambiguity refusal names: `--on` for the human (CLI) arm,
    *  `cotal agent-bearer`'s `--manager-instance` for the agent arm, the wire field otherwise. */
@@ -661,6 +667,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
   // the FRESH space-manager-lease holder check) and dispatches.
   const authAdmin = await openAuthAdminListener({ onConnection, server, space, dataAccount, reg: barrierReg, retirement, barrierFlight: retirementFlights, instanceId: authServeInstanceId, epoch: authServeGrant.epoch, grant: authServeGrant, log });
   unwind.push(() => authAdmin.close());
+  const recordToolResultConsent = makeToolResultConsentRecorder(registryStores(registry).authKv, () => refuseIfFenced(), space);
   const fileArm = ledgerAuthorizeConnect(opts.dir);
   // The callout's issuance evidence: create-only natkey row, then the connect authority re-read
   // in the same stream before the minted JWT may leave.
@@ -847,6 +854,7 @@ async function buildAuthAuthorityPlane(opts: OpenAuthAuthorityPlaneOptions, unwi
       refuseIfFenced();
       return recordIssuance(i);
     },
+    recordToolResultConsent,
     mintConnectCredential: (args) => {
       refuseIfFenced();
       return ensureRootCredential(registry, { ...args, managerInstance: `auth-service:${space}` });
@@ -2042,6 +2050,8 @@ export async function startAuthService(inputs: HostedContextInputs & {
   /** Trusted-host only. Forwarded unchanged to {@link openAuthAuthorityPlane}, which bounds it to
    *  5..86400 seconds. Absent: the 24h default. No CLI flag and no request field sets it. */
   standingRenewableTtlSeconds?: number;
+  /** Opt-in trusted-host consent signer, with seed material already in the private store. */
+  toolResultConsents?: ToolResultConsentSignerOptions;
 }): Promise<AuthServiceHandle> {
   if (!inputs.context?.accountPublicKey || !inputs.context.lifecycleUid || !inputs.space || !inputs.servers || !inputs.stateDir)
     throw new Error("auth-service: hosted context needs an account, lifecycle, space, server and stateDir");
@@ -2052,6 +2062,10 @@ export async function startAuthService(inputs: HostedContextInputs & {
     throw new Error("auth-service: hosted SecretStore identity does not match the assigned store identity");
   const port = inputs.port ?? 0;
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`auth-service: port must be a port number, got ${port}`);
+  if (inputs.toolResultConsents !== undefined &&
+      (!inputs.toolResultConsents || typeof inputs.toolResultConsents.keyId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,200}$/.test(inputs.toolResultConsents.keyId) || typeof inputs.toolResultConsents.resolveAnchor !== "function"))
+    throw new Error("auth-service: tool-result consent signer requires a key id and fresh anchor resolver");
   if (inputs.platformControl !== undefined && typeof inputs.platformControl?.observeAssignment !== "function")
     throw new Error("auth-service: platformControl requires an observeAssignment function");
   const host = inputs.platformControl?.host;
@@ -2076,6 +2090,7 @@ export async function startAuthService(inputs: HostedContextInputs & {
     ...(inputs.platformControl !== undefined ? { platformControl: inputs.platformControl } : {}),
     ...(inputs.platformSupervisor !== undefined ? { platformSupervisor: inputs.platformSupervisor } : {}),
     ...(inputs.standingRenewableTtlSeconds !== undefined ? { standingRenewableTtlSeconds: inputs.standingRenewableTtlSeconds } : {}),
+    ...(inputs.toolResultConsents !== undefined ? { toolResultConsents: inputs.toolResultConsents } : {}),
   });
   return { ...started.handle, readiness: (): HostedServiceState => ({ ...started.status(), context: inputs.context }) };
 }
@@ -2087,6 +2102,7 @@ type AuthContextEnd = { kind: "fenced"; cause: string } | { kind: "broker"; caus
 type AuthContextStatus = { state: "ready" | "draining" } | { state: "unavailable"; cause: string };
 
 interface AuthContextOptions {
+  toolResultConsents?: ToolResultConsentSignerOptions;
   space: string;
   server: string;
   port: number;
@@ -2199,7 +2215,12 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
     let publicUrl: string | undefined;
     const failures: number[] = []; // rolling-window timestamps of REFUSED exchanges
     const badCaps: number[] = []; // rolling-window timestamps of invalid-capability attempts
+    const issueToolResultConsent = o.toolResultConsents === undefined ? undefined : createToolResultConsentSigner({
+      space, accountPublicKey: keys.dataAccount.pub, dir, store: secrets, idp: bridgeIdp, ownerSecret,
+      signer: o.toolResultConsents, record: plane.recordToolResultConsent,
+    });
     const ctx: HandlerCtx = {
+      ...(issueToolResultConsent ? { issueToolResultConsent } : {}),
       issuer,
       bridge,
       bridgeIdp,
@@ -2468,6 +2489,7 @@ async function startAuthContext(o: AuthContextOptions): Promise<{ handle: Omit<A
 type HumanHolder = Extract<ManagerAuthorityHolder, { scope: string[] }>;
 
 interface HandlerCtx {
+  issueToolResultConsent?: (raw: unknown) => Promise<import("@cotal-ai/core").ToolResultConsent>;
   issuer: UserTokenIssuer;
   bridge: IdpBridge;
   bridgeIdp: { issuer: string; audience: string; key: ReturnType<typeof pinnedJwksResolver> };
@@ -2681,6 +2703,7 @@ const ROUTES = new Map<string, RouteHandler>([
   [MANAGED_RETIRE_PATH, handleManagedLifecycleRetirement],
   [VERIFY_ENROLLMENT_PATH, handleVerifyManagedAgentEnrollment],
   [TOOL_RESULT_HUMAN_PROOF_PATH, handleToolResultHumanProof],
+  [TOOL_RESULT_CONSENT_PATH, handleToolResultConsent],
 ]);
 
 /** Route one HTTP request against the loopback route table. Errors are JSON `{ error }`. */
@@ -3134,6 +3157,26 @@ export async function handleToolResultHumanProof(
     return send(res, 200, { authorized: true, owner, ...proof });
   } catch {
     return send(res, 403, { error: "fresh signed password proof required" });
+  }
+}
+
+/** Consent issuance is confined to the authenticated host face and uses sanitized refusals. */
+export async function handleToolResultConsent(req: IncomingMessage, res: ServerResponse,
+  ctx: Pick<HandlerCtx, "cap" | "badCaps" | "issueToolResultConsent">): Promise<void> {
+  if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+  if (req.headers.origin !== undefined) return send(res, 403, { error: "browser-origin requests are not served here" });
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? "")) return send(res, 415, { error: "content-type must be application/json" });
+  if (req.headers.authorization !== `Bearer ${ctx.cap}`)
+    return refuseCapability(res, ctx, "missing/invalid exchange capability - consent issuance is a loopback host action");
+  if (!ctx.issueToolResultConsent) return send(res, 503, { error: "tool-result-consent-unavailable", outcome: "not-executed" });
+  let body: unknown;
+  try { body = await readJsonBody(req); }
+  catch { return send(res, 400, { error: "invalid consent request", outcome: "not-executed" }); }
+  try { return send(res, 200, { consent: await ctx.issueToolResultConsent(body) }, { "cache-control": "no-store" }); }
+  catch (error) {
+    const code = error instanceof EpEnvelopeError ? error.code : "unavailable";
+    const status = code === "bad-request" ? 400 : code === "permission-denied" ? 403 : code === "conflict" ? 409 : 503;
+    return send(res, status, { error: `tool-result-consent-${code}`, outcome: error instanceof EpEnvelopeError ? error.outcome ?? "unknown" : "unknown" });
   }
 }
 
